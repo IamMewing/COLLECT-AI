@@ -1,0 +1,326 @@
+/* ==========================================================================
+   CollectAI — Design System
+   "AI-Native Accounts Receivable Operating System"
+   Strands Agents Approval Gate UI
+   ========================================================================== */
+
+:root {
+  /* Core Palette */
+  --ink: #0A0A0A;
+  --paper: #FAFAF7;
+  --paper-warm: #F5F2EB;
+  --yellow: #FFD400;
+  --yellow-soft: rgba(255, 212, 0, 0.12);
+  --lavender: #E8E4FF;
+  --mint: #D1FAE5;
+  --mint-dark: #059669;
+  --blue: #E4EEFF;
+  --border: #E0DDD5;
+  --muted: #8B8580;
+  --white: #FFFFFF;
+  --red: #E8382A;
+  --red-soft: #FEE2E2;
+  --amber: #F59E0B;
+  --amber-soft: #FEF3C7;
+
+  /* Typography Scale */
+  --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  --text-hero: 2.5rem;
+  --text-section: 1.6rem;
+  --text-title: 1.2rem;
+  --text-body: 0.95rem;
+  --text-caption: 0.82rem;
+  --text-mono: 0.8rem;
+  --text-label: 0.72rem;
+
+  /* Borders & Shadows */
+  --border-width: 2px;
+  --border-thick: 2.5px;
+  --border-style: solid;
+  --stroke: var(--border-width) var(--border-style) var(--ink);
+  --stroke-thick: var(--border-thick) var(--border-style) var(--ink);
+  --stroke-subtle: 1px solid var(--border);
+
+  /* Neo-brutalist 3D directional shadows */
+  --shadow-flat-sm: 2px 2px 0 var(--ink);
+  --shadow-flat-md: 3.5px 3.5px 0 var(--ink);
+  --shadow-flat-lg: 6px 6px 0 var(--ink);
+  --shadow-card-hover: 5px 5px 0 var(--ink);
+
+  /* Layout */
+  --nav-height: 64px;
+  --content-max: 1240px;
+
+  /* Transitions */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-base: 0.18s var(--ease-out);
+}
+
+/* Base Reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Layout Utilities */
+.app-container {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 24px 28px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Typography Helpers */
+.label-text {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.mono-tag {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+}
+
+/* OS Cards (Neo-brutalist) */
+.os-card {
+  background: var(--white);
+  border: var(--stroke);
+  box-shadow: var(--shadow-flat-md);
+  border-radius: 4px;
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+
+.os-card-warm {
+  background: var(--paper-warm);
+}
+
+.os-card.hover-lift:hover {
+  transform: translate(-1.5px, -1.5px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Buttons */
+button {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--text-body);
+  padding: 10px 18px;
+  border-radius: 3px;
+  border: var(--stroke);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all var(--transition-base);
+  user-select: none;
+}
+
+button:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--ink) !important;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--yellow);
+  color: var(--ink);
+  box-shadow: var(--shadow-flat-sm);
+}
+
+button.primary:hover:not(:disabled) {
+  background: #ffe033;
+  box-shadow: var(--shadow-flat-md);
+  transform: translate(-1px, -1px);
+}
+
+button.secondary {
+  background: var(--white);
+  color: var(--ink);
+  box-shadow: var(--shadow-flat-sm);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--paper-warm);
+  box-shadow: var(--shadow-flat-md);
+}
+
+button.btn-approve {
+  background: var(--mint);
+  color: #064E3B;
+  border-color: var(--ink);
+  box-shadow: var(--shadow-flat-sm);
+}
+
+button.btn-approve:hover:not(:disabled) {
+  background: #A7F3D0;
+  box-shadow: var(--shadow-flat-md);
+  transform: translate(-1px, -1px);
+}
+
+button.btn-reject {
+  background: var(--white);
+  color: var(--red);
+  border-color: var(--ink);
+  box-shadow: var(--shadow-flat-sm);
+}
+
+button.btn-reject:hover:not(:disabled) {
+  background: var(--red-soft);
+  box-shadow: var(--shadow-flat-md);
+  transform: translate(-1px, -1px);
+}
+
+button.btn-edit {
+  background: var(--lavender);
+  color: #3730A3;
+  border-color: var(--ink);
+  box-shadow: var(--shadow-flat-sm);
+}
+
+button.btn-edit:hover:not(:disabled) {
+  background: #DDD6FE;
+  box-shadow: var(--shadow-flat-md);
+  transform: translate(-1px, -1px);
+}
+
+/* Badges & Status */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 2px;
+  border: 1.5px solid var(--ink);
+  line-height: 1;
+}
+
+.badge-low {
+  background: var(--mint);
+  color: #065F46;
+}
+
+.badge-medium {
+  background: var(--yellow-soft);
+  color: #92400E;
+  background-color: #FEF3C7;
+}
+
+.badge-high {
+  background: #FED7AA;
+  color: #9A3412;
+}
+
+.badge-critical {
+  background: var(--red-soft);
+  color: #991B1B;
+}
+
+.badge-channel {
+  background: var(--blue);
+  color: #1E40AF;
+}
+
+.badge-branch {
+  background: var(--lavender);
+  color: #4338CA;
+}
+
+/* Stamp Overlay */
+.stamp-overlay {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border: 2.5px solid var(--ink);
+  border-radius: 2px;
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: rotate(-2.5deg);
+  text-transform: uppercase;
+}
+
+.stamp-approved {
+  background: var(--mint);
+  color: #064E3B;
+}
+
+.stamp-rejected {
+  background: var(--red-soft);
+  color: #991B1B;
+}
+
+.stamp-pending {
+  background: var(--yellow);
+  color: var(--ink);
+}
+
+/* Form Controls */
+input, textarea, select {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  padding: 10px 14px;
+  border: var(--stroke);
+  border-radius: 3px;
+  background: var(--white);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.06);
+  outline: none;
+  transition: border-color var(--transition-base);
+}
+
+input:focus, textarea:focus, select:focus {
+  border-color: var(--ink);
+  box-shadow: var(--shadow-flat-sm);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+/* Animation keyframes */
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.pulsing-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10B981;
+  animation: pulseGlow 1.8s infinite ease-in-out;
+}

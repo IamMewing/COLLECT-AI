@@ -1,0 +1,8 @@
+node_modules
+client/node_modules
+.git
+.env
+client/.env
+server.log
+serviceAccountKey.json
+*.local

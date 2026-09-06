@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.production
+client/.env
+client/client/.env
+
+# Firebase credentials — NEVER commit these
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
+firebase-debug.log
+firebase-debug.*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Firebase
+.firebase/

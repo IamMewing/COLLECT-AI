@@ -7,5 +7,15 @@ node_modules/
 venv/
 __pycache__/
 *.pyc
+
+# Build outputs (at any level)
 dist/
 **/dist/
+build/
+**/build/
+.next/
+**/.next/
+out/
+**/out/
+public/assets/
+**/public/assets/

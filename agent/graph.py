@@ -69,7 +69,11 @@ def build_graph():
     return builder.build()
 
 
-def run_sweep(invoice_task: str) -> GraphResult:
+import re
+from .memory import get_client_memory, has_client_memory, remember_invoice_score
+
+
+def run_sweep(invoice_task: str, client_name: str | None = None) -> GraphResult:
     """Run the risk -> probability -> plan -> (maybe) draft sweep for one invoice.
 
     Args:
@@ -78,10 +82,31 @@ def run_sweep(invoice_task: str) -> GraphResult:
             relationship_score, and historical_on_time_rate — the
             risk/probability tools need these exact fields, so the
             entry-point agents are instructed to extract them from this text.
+        client_name: Optional explicit client name to read persistent memory.
 
     Returns:
         GraphResult — inspect .results["draft"] for the DraftedMessage
         (absent if the plan node decided branch == "no_action").
     """
+    if not client_name:
+        match = re.search(r'client\s+"([^"]+)"', invoice_task)
+        if match:
+            client_name = match.group(1)
+
+    # If relationship score is in task text, remember it so new client records match it
+    score_match = re.search(r'relationship\s+score:\s*(\d+)', invoice_task, re.IGNORECASE)
+    if client_name and score_match:
+        remember_invoice_score({"client_name": client_name, "relationship_score": int(score_match.group(1))})
+
+    if client_name and has_client_memory(client_name):
+        mem = get_client_memory(client_name)
+        mem_context = (
+            f"\n\n[Persistent Client Memory for {client_name}]:\n"
+            f"- Current Relationship Score: {mem.get('relationship_score', 70)}/100\n"
+            f"- Prior Interactions: {len(mem.get('interaction_history', []))} logged\n"
+        )
+        invoice_task = invoice_task.strip() + mem_context
+
     graph = build_graph()
     return graph(invoice_task)
+

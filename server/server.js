@@ -98,7 +98,8 @@ app.post('/api/agent/sweep', async (req, res) => {
  */
 app.post('/api/agent/approve', async (req, res) => {
   try {
-    const { draft, approved, edited_body } = req.body || {};
+    const { draft, approved, edited_body, client_name } = req.body || {};
+    const invoice = req.body?.invoice || SAMPLE_INVOICES.find(i => (req.body?.invoice_id && i.invoice_id === req.body.invoice_id) || (client_name && i.client_name === client_name));
 
     if (!draft) {
       return res.status(400).json({
@@ -112,7 +113,7 @@ app.post('/api/agent/approve', async (req, res) => {
       console.log(`📝 Human edited the message body before approving.`);
     }
 
-    const result = await approveAndExecute(draft, approved, edited_body);
+    const result = await approveAndExecute(draft, approved, edited_body, client_name, invoice);
     res.json(result);
   } catch (error) {
     console.error('❌ [POST /api/agent/approve] Failed:', error);

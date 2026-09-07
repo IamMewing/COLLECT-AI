@@ -9,6 +9,7 @@ graph's execution model when a plain function does the job clearly.
 
 from .agents import build_reflect_agent
 from .models import DraftedMessage, Reflection
+from .memory import update_client_memory, extract_client_name_from_draft
 
 
 def send_message(message: DraftedMessage) -> dict:
@@ -20,7 +21,14 @@ def send_message(message: DraftedMessage) -> dict:
     return {"status": "sent", "channel": message.channel}
 
 
-def approve_and_execute(message: DraftedMessage, approved: bool, edited_body: str | None = None) -> dict:
+def approve_and_execute(
+    message: DraftedMessage,
+    approved: bool,
+    edited_body: str | None = None,
+    client_name: str | None = None,
+    invoice: dict | None = None,
+    initial_score: int | None = None,
+) -> dict:
     """Called by the Approval Gate UI when the human clicks Approve/Reject.
 
     Args:
@@ -28,12 +36,29 @@ def approve_and_execute(message: DraftedMessage, approved: bool, edited_body: st
         approved: True if the human clicked Approve.
         edited_body: If the human edited the draft before approving,
             pass the edited text here — it overrides message.body.
+        client_name: Optional name of the client to update memory for.
+        invoice: Optional invoice dict to seed relationship_score if new client.
+        initial_score: Optional explicit score to seed if new client.
 
     Returns:
         dict with the execution result and the reflection, or a
         'skipped' status if the human rejected the draft.
     """
+    c_name = client_name or extract_client_name_from_draft(message)
+
     if not approved:
+        reflection = Reflection(
+            was_best_decision=False,
+            suggested_tone_shift="Message rejected by human reviewer.",
+            suggested_relationship_delta=-1,
+        )
+        update_client_memory(
+            c_name,
+            reflection,
+            action_taken="rejected_by_reviewer",
+            invoice=invoice,
+            initial_score=initial_score,
+        )
         return {"status": "skipped", "reason": "rejected by human reviewer"}
 
     if edited_body:
@@ -51,4 +76,14 @@ def approve_and_execute(message: DraftedMessage, approved: bool, edited_body: st
     )
     reflection: Reflection = reflect_result.structured_output
 
+    # Wire persistent client memory
+    update_client_memory(
+        c_name,
+        reflection,
+        action_taken="approved_and_sent",
+        invoice=invoice,
+        initial_score=initial_score,
+    )
+
     return {"status": "sent", "send_result": send_result, "reflection": reflection}
+

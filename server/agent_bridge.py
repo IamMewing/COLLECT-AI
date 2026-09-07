@@ -57,10 +57,16 @@ def handle_sweep(payload: dict) -> dict:
         "historical_on_time_rate": float(invoice["historical_on_time_rate"]),
     }
 
+    from agent.memory import get_client_memory, has_client_memory
+
     if USE_MOCK:
         result = mock_run_sweep(clean_invoice)
     else:
         # For real Strands Agent graph
+        c_name = clean_invoice['client_name']
+        if has_client_memory(c_name):
+            clean_invoice['relationship_score'] = get_client_memory(c_name)['relationship_score']
+
         task = (
             f"Invoice #{clean_invoice['invoice_id']} for client \"{clean_invoice['client_name']}\"\n"
             f"- Amount: INR {clean_invoice['amount']}\n"
@@ -70,7 +76,7 @@ def handle_sweep(payload: dict) -> dict:
             f"- Historical on-time payment rate: {clean_invoice['historical_on_time_rate']}\n\n"
             f"Assess this invoice's risk, predict payment probability, decide action plan, and draft message if warranted."
         )
-        graph_result = run_sweep(task)
+        graph_result = run_sweep(task, client_name=clean_invoice['client_name'])
         # Extract structured outputs
         risk = graph_result.results.get("risk_assess")
         prob = graph_result.results.get("probability")
@@ -83,6 +89,10 @@ def handle_sweep(payload: dict) -> dict:
             "draft": draft.result.structured_output if draft else None,
         }
 
+    # If client has persisted memory, reflect the current stored score
+    if has_client_memory(clean_invoice["client_name"]):
+        clean_invoice["relationship_score"] = get_client_memory(clean_invoice["client_name"])["relationship_score"]
+
     # Serialize pydantic models to dicts
     serialized = {
         "invoice": clean_invoice,
@@ -90,14 +100,18 @@ def handle_sweep(payload: dict) -> dict:
         "probability": result["probability"].model_dump() if result.get("probability") else None,
         "plan": result["plan"].model_dump() if result.get("plan") else None,
         "draft": result["draft"].model_dump() if result.get("draft") else None,
+        "client_memory": get_client_memory(clean_invoice["client_name"]) if has_client_memory(clean_invoice["client_name"]) else None,
     }
     return serialized
 
 
 def handle_approve(payload: dict) -> dict:
+    from agent.memory import get_client_memory, extract_client_name_from_draft, has_client_memory
+
     draft_data = payload.get("draft")
     approved = bool(payload.get("approved", False))
     edited_body = payload.get("edited_body")
+    client_name = payload.get("client_name")
 
     if not draft_data:
         raise ValueError("Missing 'draft' in approve payload")
@@ -112,10 +126,13 @@ def handle_approve(payload: dict) -> dict:
         channel=draft_data.get("channel", "email"),
     )
 
+    c_name = client_name or extract_client_name_from_draft(draft)
+    invoice = payload.get("invoice")
+
     if USE_MOCK:
-        outcome = mock_approve_and_execute(draft=draft, approved=approved)
+        outcome = mock_approve_and_execute(draft=draft, approved=approved, client_name=c_name, invoice=invoice)
     else:
-        outcome = approve_and_execute(message=draft, approved=approved, edited_body=edited_body)
+        outcome = approve_and_execute(message=draft, approved=approved, edited_body=edited_body, client_name=c_name, invoice=invoice)
 
     # Serialize outcome
     serialized_outcome = {
@@ -124,6 +141,7 @@ def handle_approve(payload: dict) -> dict:
         "channel": draft.channel,
         "subject": draft.subject,
         "final_body": draft.body,
+        "client_memory": get_client_memory(c_name) if has_client_memory(c_name) else None,
     }
 
     if "reflection" in outcome and outcome["reflection"]:

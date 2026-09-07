@@ -1,0 +1,20 @@
+{
+  "Meridian Design Co.": {
+    "relationship_score": 66,
+    "preferred_tone": null,
+    "interaction_history": [
+      {
+        "date": "2026-09-07T15:41:17.182946+00:00",
+        "action": "approved_and_sent",
+        "outcome": "[MOCK] Outreach dispatched successfully."
+      },
+      {
+        "date": "2026-09-07T15:41:25.048196+00:00",
+        "action": "approved_and_sent",
+        "outcome": "[MOCK] Outreach dispatched successfully."
+      }
+    ],
+    "total_invoices": 1,
+    "on_time_count": 1
+  }
+}

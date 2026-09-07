@@ -37,6 +37,8 @@ export async function approveAndExecute(params: {
   draft: DraftedMessage;
   approved: boolean;
   edited_body?: string;
+  client_name?: string;
+  invoice?: Invoice;
 }): Promise<ApproveResult> {
   const res = await fetch(`${API_BASE}/agent/approve`, {
     method: 'POST',

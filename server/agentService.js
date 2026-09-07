@@ -93,9 +93,16 @@ async function runSweep(invoice) {
  * @param {object} draft - { subject, body, channel }
  * @param {boolean} approved
  * @param {string|null} editedBody - Optional human-edited body
+ * @param {string|null} clientName - Optional client name
  */
-async function approveAndExecute(draft, approved, editedBody = null) {
-  return callAgentBridge('approve', { draft, approved, edited_body: editedBody });
+async function approveAndExecute(draft, approved, editedBody = null, clientName = null, invoice = null) {
+  return callAgentBridge('approve', {
+    draft,
+    approved,
+    edited_body: editedBody,
+    client_name: clientName,
+    invoice,
+  });
 }
 
 module.exports = {

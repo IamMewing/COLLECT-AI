@@ -77,6 +77,8 @@ export const App: React.FC = () => {
         draft,
         approved: true,
         edited_body: editedBody,
+        client_name: selectedInvoice?.client_name,
+        invoice: selectedInvoice,
       });
       setApproveResult(outcome);
     } catch (err: any) {
@@ -100,6 +102,8 @@ export const App: React.FC = () => {
       const outcome = await approveAndExecute({
         draft,
         approved: false,
+        client_name: selectedInvoice?.client_name,
+        invoice: selectedInvoice,
       });
       setApproveResult(outcome);
     } catch (err: any) {

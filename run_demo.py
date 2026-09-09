@@ -15,6 +15,7 @@ against it today — swapping to --mock off later needs zero changes
 downstream.
 """
 
+import os
 import sys
 from agent import run_sweep, approve_and_execute, mock_run_sweep, mock_approve_and_execute
 
@@ -68,7 +69,10 @@ def main():
         print(outcome)
         return
 
-    print("Running sweep for one invoice (real Claude calls)...\n")
+    provider = os.environ.get("MODEL_PROVIDER", "anthropic").strip().lower()
+    default_model = "claude-sonnet-4-6" if provider == "anthropic" else ("gemini-3.1-flash-lite" if provider == "gemini" else "default")
+    model_name = os.environ.get("COLLECTAI_MODEL_ID", default_model)
+    print(f"Running sweep for one invoice (real {provider.capitalize()} [{model_name}] calls)...\n")
     result = run_sweep(INVOICE_TASK)
 
     print(f"Graph status: {result.status}")

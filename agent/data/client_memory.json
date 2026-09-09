@@ -16,5 +16,18 @@
     ],
     "total_invoices": 1,
     "on_time_count": 1
+  },
+  "Team at Meridian Design": {
+    "relationship_score": 70,
+    "preferred_tone": null,
+    "interaction_history": [
+      {
+        "date": "2026-09-09T17:15:33.585076+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Maintain the current professional and helpful tone, but prepare to shift to a firmer, more urgent tone if there is no response within 3-5 business days."
+      }
+    ],
+    "total_invoices": 1,
+    "on_time_count": 1
   }
 }

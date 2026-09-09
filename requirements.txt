@@ -1,4 +1,6 @@
 strands-agents>=1.54.0
 strands-agents-tools
 anthropic
+google-genai
 pydantic>=2
+

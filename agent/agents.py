@@ -21,23 +21,37 @@ from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMe
 MODEL_ID = os.environ.get("COLLECTAI_MODEL_ID", "claude-sonnet-4-6")
 
 
-def get_model() -> AnthropicModel:
-    """Anthropic-direct model provider.
+def get_model():
+    """Model provider factory supporting Anthropic, Gemini, and Bedrock.
 
-    To switch to Bedrock later (e.g. once AgentCore access clears),
-    replace this with:
-
+    Reads MODEL_PROVIDER env var (default: "anthropic"):
+    - "anthropic": Anthropic-direct model provider (requires ANTHROPIC_API_KEY)
+    - "gemini": Google Gemini model provider (requires GEMINI_API_KEY)
+    - "bedrock": AWS Bedrock option (documented for when AgentCore access clears):
         from strands.models import BedrockModel
         return BedrockModel(model_id="anthropic.claude-sonnet-4-6...", region_name="us-east-1")
 
     Nothing else in this file or in graph.py needs to change — every
     node just calls get_model().
     """
-    return AnthropicModel(
-        client_args={"api_key": os.environ["ANTHROPIC_API_KEY"]},
-        model_id=MODEL_ID,
-        max_tokens=1024,
-    )
+    provider = os.environ.get("MODEL_PROVIDER", "anthropic").strip().lower()
+
+    if provider == "gemini":
+        from strands.models.gemini import GeminiModel
+        return GeminiModel(
+            client_args={"api_key": os.environ["GEMINI_API_KEY"].strip()},
+            model_id=os.environ.get("COLLECTAI_MODEL_ID", "gemini-3.1-flash-lite").strip(),
+        )
+    elif provider == "anthropic":
+        return AnthropicModel(
+            client_args={"api_key": os.environ["ANTHROPIC_API_KEY"]},
+            model_id=MODEL_ID,
+            max_tokens=1024,
+        )
+    elif provider == "bedrock":
+        raise NotImplementedError("Bedrock provider not yet configured — set MODEL_PROVIDER=gemini or MODEL_PROVIDER=anthropic")
+    else:
+        raise ValueError(f"Unknown MODEL_PROVIDER '{provider}'. Supported options: 'anthropic', 'gemini', 'bedrock'.")
 
 
 def build_risk_agent() -> Agent:

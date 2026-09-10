@@ -19,9 +19,17 @@ const PYTHON_CMD = process.env.PYTHON_PATH || 'python';
  */
 function callAgentBridge(action, payload) {
   return new Promise((resolve, reject) => {
+    const childEnv = {
+      ...process.env,
+      MODEL_PROVIDER: process.env.MODEL_PROVIDER || 'gemini',
+      ...(process.env.GEMINI_API_KEY ? { GEMINI_API_KEY: process.env.GEMINI_API_KEY } : {}),
+      ...(process.env.USE_MOCK !== undefined ? { USE_MOCK: process.env.USE_MOCK } : {}),
+      ...(process.env.COLLECT_AI_MOCK !== undefined ? { COLLECT_AI_MOCK: process.env.COLLECT_AI_MOCK } : {}),
+    };
+
     const child = spawn(PYTHON_CMD, [BRIDGE_SCRIPT], {
       cwd: __dirname,
-      env: { ...process.env },
+      env: childEnv,
     });
 
     let stdoutData = '';

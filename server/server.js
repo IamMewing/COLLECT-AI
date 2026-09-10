@@ -52,10 +52,12 @@ const SAMPLE_INVOICES = [
  * Basic health check with service details.
  */
 app.get('/api/health', (req, res) => {
+  const isMock = (process.env.USE_MOCK || process.env.COLLECT_AI_MOCK || 'false').toLowerCase() === 'true';
   res.json({
     status: 'ok',
     service: 'CollectAI Agent Server',
-    mode: process.env.COLLECT_AI_MOCK === 'false' ? 'real-strands' : 'mock-strands',
+    mode: isMock ? 'mock-strands' : 'real-strands',
+    model_provider: process.env.MODEL_PROVIDER || 'gemini',
     timestamp: new Date().toISOString(),
   });
 });

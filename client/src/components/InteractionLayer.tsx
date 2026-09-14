@@ -32,7 +32,7 @@ const LERP_FACTORS = [0.32, 0.24, 0.18, 0.13];
 // This shape's own coordinates are much smaller (~11x18) than the old dart
 // (~30x42), so scale multipliers are boosted proportionally to render at
 // the same on-screen size as before.
-const SCALES = [2.2, 1.9, 1.6, 1.3];
+const SCALES = [1.0, 0.85, 0.7, 0.55];
 const ALPHAS = [0.85, 0.72, 0.58, 0.44];
 
 export const InteractionLayer: React.FC = () => {

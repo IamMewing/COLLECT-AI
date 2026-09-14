@@ -50,6 +50,7 @@ export interface SweepResult {
   probability: ProbabilityAssessment;
   plan: ActionPlan;
   draft: DraftedMessage | null;
+  client_memory?: any;
 }
 
 export interface ApproveResult {
@@ -59,6 +60,7 @@ export interface ApproveResult {
   subject?: string;
   final_body?: string;
   reflection?: Reflection | null;
+  client_memory?: any;
   send_result?: {
     status: string;
     channel: string;

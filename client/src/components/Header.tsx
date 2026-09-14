@@ -1,5 +1,5 @@
-import React from 'react';
-import { Bot, RefreshCw } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Activity, Cpu, RefreshCw, ShieldCheck } from 'lucide-react';
 
 interface HeaderProps {
   onRefresh?: () => void;
@@ -7,110 +7,104 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onRefresh, isLoading }) => {
+  const [clock, setClock] = useState<string>('');
+
+  useEffect(() => {
+    const tick = () => {
+      const d = new Date();
+      setClock(
+        d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <header
       style={{
-        borderBottom: 'var(--stroke-thick)',
-        background: 'var(--white)',
-        padding: '16px 28px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        boxShadow: '0 2px 0 var(--ink)',
+        position: 'sticky', top: 0, zIndex: 50,
+        height: 'var(--header-height)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 28px',
+        background: 'rgba(9,12,20,0.72)',
+        backdropFilter: 'blur(20px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+        borderBottom: '1px solid var(--border-glow)',
       }}
     >
+      {/* Brand */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
         <div
           style={{
-            width: '42px',
-            height: '42px',
-            background: 'var(--yellow)',
-            border: 'var(--stroke)',
-            boxShadow: 'var(--shadow-flat-sm)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 800,
-            fontSize: '1.2rem',
-            fontFamily: 'var(--font-display)',
+            width: 42, height: 42, borderRadius: 11,
+            display: 'grid', placeItems: 'center',
+            background: 'linear-gradient(135deg, rgba(255,210,63,0.16), rgba(0,229,199,0.10))',
+            border: '1px solid rgba(255,210,63,0.35)',
+            boxShadow: '0 0 22px rgba(255,210,63,0.18)',
           }}
         >
-          CA
+          <span
+            className="display-title glow-gold"
+            style={{ fontSize: '1.05rem', color: 'var(--gold)', fontWeight: 800 }}
+          >
+            C
+          </span>
         </div>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h1
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: '1.35rem',
-                fontWeight: 800,
-                letterSpacing: '-0.02em',
-                lineHeight: 1.1,
-              }}
-            >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="display-title" style={{ fontSize: '1.2rem', letterSpacing: '-0.02em' }}>
               CollectAI
-            </h1>
-            <span
-              style={{
-                background: 'var(--mint)',
-                border: '1.5px solid var(--ink)',
-                borderRadius: '2px',
-                padding: '2px 6px',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.65rem',
-                fontWeight: 700,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <span className="pulsing-dot" /> STRANDS AGENTS GRAPH
+            </span>
+            <span className="badge badge-healthy" style={{ padding: '2px 8px' }}>
+              <span className="pulse-dot" style={{ width: 6, height: 6 }} /> Strands Ledger
             </span>
           </div>
-          <p
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.72rem',
-              color: 'var(--muted)',
-              marginTop: '2px',
-            }}
-          >
-            Phase 2 Human-in-the-Loop Approval Gate · Risk → Probability → Plan → Draft → Review
-          </p>
+          <div className="mono-label" style={{ marginTop: 2, fontSize: '0.6rem' }}>
+            Midnight Ledger · Autonomous Receivables · Human-in-the-Loop
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      {/* Status cluster */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div
+          className="badge badge-neutral"
+          style={{ display: 'none' }}
+          data-hide-mobile
+        />
+        <div className="badge badge-gold" title="Model provider">
+          <Cpu size={12} /> Gemini 3.1 Flash-Lite
+        </div>
+        <div className="badge badge-healthy" title="Execution engine">
+          <ShieldCheck size={12} /> Real Strands
+        </div>
+        <div
+          className="mono-value"
           style={{
-            padding: '6px 12px',
-            background: 'var(--paper-warm)',
-            border: 'var(--stroke)',
-            borderRadius: '3px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.75rem',
+            fontSize: '0.82rem', color: 'var(--text-secondary)',
+            padding: '6px 12px', borderRadius: 8,
+            border: '1px solid var(--border-subtle)', background: 'rgba(11,15,25,0.6)',
+            display: 'flex', alignItems: 'center', gap: 8,
           }}
         >
-          <Bot size={15} />
-          <span>MOCK SWEEP ENGINE</span>
+          <Activity size={13} color="var(--healthy)" /> {clock}
         </div>
-
         {onRefresh && (
           <button
+            className="btn btn-neutral"
             onClick={onRefresh}
             disabled={isLoading}
-            className="secondary"
-            style={{ padding: '7px 12px', fontSize: '0.8rem' }}
-            title="Reload invoices"
+            style={{ padding: '9px 16px', fontSize: '0.82rem' }}
           >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
-            <span>Reset</span>
+            <RefreshCw size={13} className={isLoading ? 'spinner' : ''} style={isLoading ? { border: 'none' } : undefined} />
+            Sync
           </button>
         )}
       </div>
     </header>
   );
 };
+
+export default Header;

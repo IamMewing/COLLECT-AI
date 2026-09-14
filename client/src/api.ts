@@ -24,6 +24,23 @@ export async function fetchInvoices(): Promise<Invoice[]> {
   return data.invoices;
 }
 
+export async function createInvoice(payload: {
+  client_name: string;
+  amount: number;
+  days_overdue?: number;
+  ignored_reminders?: number;
+  relationship_score?: number;
+  historical_on_time_rate?: number;
+}): Promise<Invoice> {
+  const res = await fetch(`${API_BASE}/agent/invoices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await handleResponse<{ invoice: Invoice }>(res);
+  return data.invoice;
+}
+
 export async function runSweep(invoice?: Invoice): Promise<SweepResult> {
   const res = await fetch(`${API_BASE}/agent/sweep`, {
     method: 'POST',

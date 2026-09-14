@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const { runSweep, approveAndExecute } = require('./agentService');
@@ -10,6 +12,24 @@ const PORT = process.env.PORT || 3001;
 // ── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
+
+// ── User-created invoices are persisted here (survives restarts) ─────────────
+const USER_INVOICES_PATH = path.join(__dirname, 'user_invoices.json');
+
+function loadUserInvoices() {
+  try {
+    if (fs.existsSync(USER_INVOICES_PATH)) {
+      return JSON.parse(fs.readFileSync(USER_INVOICES_PATH, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Could not read user_invoices.json:', e.message);
+  }
+  return [];
+}
+
+function saveUserInvoices(list) {
+  fs.writeFileSync(USER_INVOICES_PATH, JSON.stringify(list, null, 2));
+}
 
 // ── Curated Sample Invoices for Testing Different Graph Paths ───────────────
 const SAMPLE_INVOICES = [
@@ -64,10 +84,57 @@ app.get('/api/health', (req, res) => {
 
 /**
  * GET /api/agent/invoices
- * Returns test invoices with diverse risk & probability profiles.
+ * Returns curated samples plus any user-created invoices.
  */
 app.get('/api/agent/invoices', (req, res) => {
-  res.json({ invoices: SAMPLE_INVOICES });
+  const userInvoices = loadUserInvoices();
+  res.json({ invoices: [...userInvoices, ...SAMPLE_INVOICES] });
+});
+
+/**
+ * POST /api/agent/invoices
+ * Create + persist a new invoice. Auto-derives a scenario label and defaults.
+ */
+app.post('/api/agent/invoices', (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.client_name || b.amount == null) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'client_name and amount are required to create an invoice.',
+      });
+    }
+
+    const userInvoices = loadUserInvoices();
+    const nextNum = 2000 + userInvoices.length + 1;
+
+    const daysOverdue = Number(b.days_overdue) || 0;
+    const rel = b.relationship_score != null ? Number(b.relationship_score) : 75;
+    const scenario =
+      daysOverdue > 30 ? 'High Risk Escalation (Firm Draft Expected)'
+      : daysOverdue > 10 ? 'Moderate Risk (Friendly Reminder Expected)'
+      : 'Low Risk (Agent May Choose No Action)';
+
+    const invoice = {
+      invoice_id: b.invoice_id || `INV-${nextNum}`,
+      client_name: String(b.client_name),
+      amount: Number(b.amount),
+      days_overdue: daysOverdue,
+      ignored_reminders: b.ignored_reminders != null ? Number(b.ignored_reminders) : 0,
+      relationship_score: rel,
+      historical_on_time_rate: b.historical_on_time_rate != null ? Number(b.historical_on_time_rate) : 0.8,
+      scenario,
+    };
+
+    userInvoices.unshift(invoice);
+    saveUserInvoices(userInvoices);
+
+    console.log(`\n➕ [POST /api/agent/invoices] Created ${invoice.invoice_id} for ${invoice.client_name}`);
+    res.status(201).json({ invoice });
+  } catch (error) {
+    console.error('❌ [POST /api/agent/invoices] Failed:', error);
+    res.status(500).json({ error: 'Failed to create invoice', details: error.message });
+  }
 });
 
 /**
@@ -101,7 +168,8 @@ app.post('/api/agent/sweep', async (req, res) => {
 app.post('/api/agent/approve', async (req, res) => {
   try {
     const { draft, approved, edited_body, client_name } = req.body || {};
-    const invoice = req.body?.invoice || SAMPLE_INVOICES.find(i => (req.body?.invoice_id && i.invoice_id === req.body.invoice_id) || (client_name && i.client_name === client_name));
+    const allInvoices = [...loadUserInvoices(), ...SAMPLE_INVOICES];
+    const invoice = req.body?.invoice || allInvoices.find(i => (req.body?.invoice_id && i.invoice_id === req.body.invoice_id) || (client_name && i.client_name === client_name));
 
     if (!draft) {
       return res.status(400).json({

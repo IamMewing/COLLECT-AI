@@ -67,14 +67,27 @@ def approve_and_execute(
     send_result = send_message(message)
 
     reflect_agent = build_reflect_agent()
-    reflect_result = reflect_agent(
-        f"A collections message was just sent.\n"
-        f"Channel: {message.channel}\nSubject: {message.subject}\nBody: {message.body}\n"
-        f"Send result: {send_result}\n"
-        f"(No client response yet — reflect on the decision to send this, its tone, "
-        f"and whether the approach fits the situation.)"
-    )
-    reflection: Reflection = reflect_result.structured_output
+    try:
+        reflect_result = reflect_agent(
+            f"A collections message was just sent.\n"
+            f"Channel: {message.channel}\nSubject: {message.subject}\nBody: {message.body}\n"
+            f"Send result: {send_result}\n"
+            f"(No client response yet — reflect on the decision to send this, its tone, "
+            f"and whether the approach fits the situation.)"
+        )
+        reflection: Reflection = reflect_result.structured_output
+    except Exception as exc:
+        import sys
+        sys.stderr.write(
+            f"\n⚠️ [Reflection Fallback] reflect_agent failed after retries: {exc}\n"
+            f"Falling back to default reflection so successful send is preserved.\n"
+        )
+        sys.stderr.flush()
+        reflection = Reflection(
+            was_best_decision=True,
+            suggested_tone_shift="Reflection unavailable due to a temporary service issue.",
+            suggested_relationship_delta=0,
+        )
 
     # Wire persistent client memory
     update_client_memory(

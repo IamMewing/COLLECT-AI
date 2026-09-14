@@ -1,6 +1,6 @@
 {
   "Meridian Design Co.": {
-    "relationship_score": 66,
+    "relationship_score": 67,
     "preferred_tone": null,
     "interaction_history": [
       {
@@ -12,6 +12,51 @@
         "date": "2026-09-07T15:41:25.048196+00:00",
         "action": "approved_and_sent",
         "outcome": "[MOCK] Outreach dispatched successfully."
+      },
+      {
+        "date": "2026-09-10T13:46:00.127489+00:00",
+        "action": "approved_and_sent",
+        "outcome": "The current tone is professional and appropriately firm for a 34-day delinquency. If there is no response to this, the next communication should shift to a slightly more urgent or assertive tone, perhaps referencing specific internal escalation protocols."
+      },
+      {
+        "date": "2026-09-10T13:50:19.959904+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Maintain the current firm but professional tone, but perhaps offer a more collaborative 'how can we resolve this' opening in the next follow-up if still no response."
+      },
+      {
+        "date": "2026-09-10T13:52:20.263738+00:00",
+        "action": "rejected_by_reviewer",
+        "outcome": "Message rejected by human reviewer."
+      },
+      {
+        "date": "2026-09-13T19:27:17.410366+00:00",
+        "action": "approved_and_sent",
+        "outcome": "[MOCK] Outreach dispatched successfully."
+      },
+      {
+        "date": "2026-09-13T20:59:14.655203+00:00",
+        "action": "approved_and_sent",
+        "outcome": "[MOCK] Outreach dispatched successfully."
+      },
+      {
+        "date": "2026-09-13T21:07:15.782048+00:00",
+        "action": "approved_and_sent",
+        "outcome": "The tone is professional and firm, which is appropriate for a month-overdue invoice. No shift needed at this time."
+      },
+      {
+        "date": "2026-09-14T15:44:30.375463+00:00",
+        "action": "approved_and_sent",
+        "outcome": "The subject line 'URGENT' combined with a very brief, generic salutation is likely to be perceived as aggressive and impersonal, which can damage the professional relationship. Future communications should adopt a more collaborative and helpful tone, perhaps referencing the invoice details more clearly in the body."
+      },
+      {
+        "date": "2026-09-14T16:36:11.582666+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Maintain current professional but firm tone; if no response in 48 hours, escalate to a formal call."
+      },
+      {
+        "date": "2026-09-14T16:37:26.386446+00:00",
+        "action": "approved_and_sent",
+        "outcome": "The current tone is professional and firm, which is appropriate for 34 days past due. No shift is needed yet; wait for their response before escalating to a more urgent or formal tone."
       }
     ],
     "total_invoices": 1,
@@ -25,6 +70,19 @@
         "date": "2026-09-09T17:15:33.585076+00:00",
         "action": "approved_and_sent",
         "outcome": "Maintain the current professional and helpful tone, but prepare to shift to a firmer, more urgent tone if there is no response within 3-5 business days."
+      }
+    ],
+    "total_invoices": 1,
+    "on_time_count": 1
+  },
+  "Test Client": {
+    "relationship_score": 70,
+    "preferred_tone": null,
+    "interaction_history": [
+      {
+        "date": "2026-09-14T16:25:17.032211+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Reflection unavailable due to a temporary service issue."
       }
     ],
     "total_invoices": 1,

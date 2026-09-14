@@ -91,7 +91,7 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
   const nodeX = (id: string) => NODES.find(n => n.id === id)!.x;
   const nodeY = (id: string) => (id === 'risk' ? 28 : id === 'probability' ? 72 : 50);
 
-  const edgeState = (from: string, to: string): 'live' | 'done' | 'skipped' | 'idle' => {
+  const edgeState = (_from: string, to: string): 'live' | 'done' | 'skipped' | 'idle' => {
     const sTo = statuses[to];
     if (to === 'draft' && statuses.plan === 'done' && sweepResult?.plan.branch === 'no_action') return 'skipped';
     if (sTo === 'active') return 'live';

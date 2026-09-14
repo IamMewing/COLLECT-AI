@@ -7,18 +7,70 @@ panel calls this), and there's no reason to force that through the
 graph's execution model when a plain function does the job clearly.
 """
 
+import os
+import smtplib
+from email.mime.text import MIMEText
+
 from .agents import build_reflect_agent
 from .models import DraftedMessage, Reflection
 from .memory import update_client_memory, extract_client_name_from_draft
 
 
 def send_message(message: DraftedMessage) -> dict:
-    """Stub — replace with real Nodemailer/WhatsApp-API calls (ported
-    from the original executionEngine.js / emailService.js) once
-    you're past the demo stage."""
+    """Sends the drafted message for real if SEND_REAL_EMAIL=true and SMTP
+    env vars are configured; otherwise falls back to the original
+    print-only stub. This fallback is deliberate — if credentials are
+    missing or misconfigured, the demo keeps working instead of crashing
+    the approve flow.
+
+    Required env vars for real sending (channel == "email" only):
+        SEND_REAL_EMAIL=true
+        SMTP_HOST      (default: smtp.gmail.com)
+        SMTP_PORT      (default: 587)
+        SMTP_USER      (the sending account, e.g. your Gmail address)
+        SMTP_PASS      (an App Password — NOT your regular account password)
+        DEMO_RECIPIENT_EMAIL  (where it actually gets sent — use your own
+                               inbox, since demo client emails are fictional)
+
+    WhatsApp is not wired to a real API — it still just logs.
+    """
+    real_send_requested = os.environ.get("SEND_REAL_EMAIL", "false").lower() == "true"
+
+    if real_send_requested and message.channel == "email":
+        smtp_user = os.environ.get("SMTP_USER")
+        smtp_pass = os.environ.get("SMTP_PASS")
+        recipient = os.environ.get("DEMO_RECIPIENT_EMAIL")
+
+        if not (smtp_user and smtp_pass and recipient):
+            print(
+                "[SEND via email] SEND_REAL_EMAIL=true but SMTP_USER / SMTP_PASS / "
+                "DEMO_RECIPIENT_EMAIL are not all set — falling back to stub.",
+                flush=True,
+            )
+        else:
+            try:
+                host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+                port = int(os.environ.get("SMTP_PORT", "587"))
+
+                mime_msg = MIMEText(message.body)
+                mime_msg["Subject"] = f"[CollectAI demo] {message.subject}"
+                mime_msg["From"] = smtp_user
+                mime_msg["To"] = recipient
+
+                with smtplib.SMTP(host, port, timeout=15) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_pass)
+                    server.sendmail(smtp_user, [recipient], mime_msg.as_string())
+
+                print(f"[SEND via email] Real email sent to {recipient}. Subject: {message.subject}", flush=True)
+                return {"status": "sent", "channel": message.channel, "real_send": True, "recipient": recipient}
+            except Exception as exc:  # noqa: BLE001 - deliberately broad: never let a send failure break approval
+                print(f"[SEND via email] Real send FAILED ({exc}) — falling back to stub.", flush=True)
+
+    # Stub path (default, or fallback on missing config / send failure)
     print(f"[SEND via {message.channel}] Subject: {message.subject}")
     print(message.body)
-    return {"status": "sent", "channel": message.channel}
+    return {"status": "sent", "channel": message.channel, "real_send": False}
 
 
 def approve_and_execute(
@@ -67,27 +119,14 @@ def approve_and_execute(
     send_result = send_message(message)
 
     reflect_agent = build_reflect_agent()
-    try:
-        reflect_result = reflect_agent(
-            f"A collections message was just sent.\n"
-            f"Channel: {message.channel}\nSubject: {message.subject}\nBody: {message.body}\n"
-            f"Send result: {send_result}\n"
-            f"(No client response yet — reflect on the decision to send this, its tone, "
-            f"and whether the approach fits the situation.)"
-        )
-        reflection: Reflection = reflect_result.structured_output
-    except Exception as exc:
-        import sys
-        sys.stderr.write(
-            f"\n⚠️ [Reflection Fallback] reflect_agent failed after retries: {exc}\n"
-            f"Falling back to default reflection so successful send is preserved.\n"
-        )
-        sys.stderr.flush()
-        reflection = Reflection(
-            was_best_decision=True,
-            suggested_tone_shift="Reflection unavailable due to a temporary service issue.",
-            suggested_relationship_delta=0,
-        )
+    reflect_result = reflect_agent(
+        f"A collections message was just sent.\n"
+        f"Channel: {message.channel}\nSubject: {message.subject}\nBody: {message.body}\n"
+        f"Send result: {send_result}\n"
+        f"(No client response yet — reflect on the decision to send this, its tone, "
+        f"and whether the approach fits the situation.)"
+    )
+    reflection: Reflection = reflect_result.structured_output
 
     # Wire persistent client memory
     update_client_memory(

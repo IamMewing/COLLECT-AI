@@ -47,12 +47,24 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
     if (status === 'error') return 'var(--critical)';
     if (status === 'active') return 'var(--gold)';
     if (status === 'skipped') return 'var(--text-muted)';
-    if (status === 'done') {
-      if (nodeId === 'plan' && sweepResult) {
+    if (status === 'done' && sweepResult) {
+      // Risk Assess reflects its own finding directly.
+      if (nodeId === 'risk') {
+        if (sweepResult.risk.category === 'Critical') return 'var(--critical)';
+        if (sweepResult.risk.category === 'High') return 'var(--warning)';
+        return 'var(--healthy)';
+      }
+      // Probability reflects its own number: low probability is itself a bad signal.
+      if (nodeId === 'probability') {
+        if (sweepResult.probability.probability < 30) return 'var(--critical)';
+        if (sweepResult.probability.probability < 60) return 'var(--warning)';
+        return 'var(--healthy)';
+      }
+      if (nodeId === 'plan') {
         return sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High'
           ? 'var(--critical)' : 'var(--healthy)';
       }
-      if (nodeId === 'draft' && sweepResult?.plan.tone === 'urgent') return 'var(--critical)';
+      if (nodeId === 'draft' && sweepResult.plan.tone === 'urgent') return 'var(--critical)';
       return 'var(--healthy)';
     }
     return 'var(--border-active)';

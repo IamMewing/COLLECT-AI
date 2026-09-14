@@ -17,10 +17,10 @@ const ECHO_COLORS = [
   'rgba(255,159,28,ALPHA)',  // --warning   (farthest / tail)
 ];
 
-// Bold solid dart/kite pointer silhouette — sharp tip, wide angled barb,
-// tail point. Local coordinate space, tip at the origin.
+// Bold solid dart/kite silhouette (4 points, one concave notch) — tip
+// top-left, wide point right, pulled-in notch, tail point below.
 const POINTER_PATH: [number, number][] = [
-  [0, 0], [0, 24], [6, 18.5], [10, 27], [13.5, 25.5], [9, 17], [17, 17],
+  [0, 0], [30, 20], [12, 24], [16, 42],
 ];
 
 function drawPointerGhost(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, alpha: number, color: string) {

@@ -13,6 +13,13 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// ── Serve the built client in production (single-service deploy) ────────────
+// In local dev, the client runs separately via `npm run dev` on :5173 and this
+// static dir won't exist yet — that's fine, express.static no-ops if the
+// folder is missing rather than erroring.
+const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
+app.use(express.static(CLIENT_DIST));
+
 // ── User-created invoices are persisted here (survives restarts) ─────────────
 const USER_INVOICES_PATH = path.join(__dirname, 'user_invoices.json');
 
@@ -29,6 +36,25 @@ function loadUserInvoices() {
 
 function saveUserInvoices(list) {
   fs.writeFileSync(USER_INVOICES_PATH, JSON.stringify(list, null, 2));
+}
+
+// ── Invoice status (paid/active) tracked separately by invoice_id, so it
+// applies uniformly to both curated SAMPLE_INVOICES and user-created ones ──
+const INVOICE_STATUS_PATH = path.join(__dirname, 'invoice_status.json');
+
+function loadInvoiceStatus() {
+  try {
+    if (fs.existsSync(INVOICE_STATUS_PATH)) {
+      return JSON.parse(fs.readFileSync(INVOICE_STATUS_PATH, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Could not read invoice_status.json:', e.message);
+  }
+  return {};
+}
+
+function saveInvoiceStatus(map) {
+  fs.writeFileSync(INVOICE_STATUS_PATH, JSON.stringify(map, null, 2));
 }
 
 // ── Curated Sample Invoices for Testing Different Graph Paths ───────────────
@@ -88,7 +114,34 @@ app.get('/api/health', (req, res) => {
  */
 app.get('/api/agent/invoices', (req, res) => {
   const userInvoices = loadUserInvoices();
-  res.json({ invoices: [...userInvoices, ...SAMPLE_INVOICES] });
+  const statusMap = loadInvoiceStatus();
+  const withStatus = (inv) => ({ ...inv, status: statusMap[inv.invoice_id] || 'active' });
+  res.json({ invoices: [...userInvoices, ...SAMPLE_INVOICES].map(withStatus) });
+});
+
+/**
+ * POST /api/agent/invoices/:id/mark-paid
+ * Closes the loop on an invoice's lifecycle: the human confirms payment
+ * actually arrived, so the agent should stop chasing it. Works for both
+ * curated sample invoices and user-created ones — status is tracked
+ * separately by invoice_id, not baked into the invoice record itself.
+ */
+app.post('/api/agent/invoices/:id/mark-paid', (req, res) => {
+  try {
+    const { id } = req.params;
+    const allInvoices = [...loadUserInvoices(), ...SAMPLE_INVOICES];
+    if (!allInvoices.some((i) => i.invoice_id === id)) {
+      return res.status(404).json({ error: 'Invoice not found', details: id });
+    }
+    const statusMap = loadInvoiceStatus();
+    statusMap[id] = 'paid';
+    saveInvoiceStatus(statusMap);
+    console.log(`\n✅ [POST /api/agent/invoices/${id}/mark-paid] Marked paid.`);
+    res.json({ invoice_id: id, status: 'paid' });
+  } catch (error) {
+    console.error('❌ [POST /api/agent/invoices/:id/mark-paid] Failed:', error);
+    res.status(500).json({ error: 'Failed to mark invoice paid', details: error.message });
+  }
 });
 
 /**
@@ -196,7 +249,16 @@ app.post('/api/agent/approve', async (req, res) => {
   }
 });
 
-// ── Global Error Handler ─────────────────────────────────────────────────────
+// ── SPA fallback (production only) ──────────────────────────────────────────
+// Any non-API GET request that didn't match a static file or API route falls
+// through to the client's index.html, so client-side routing works on refresh.
+app.get(/^(?!\/api).*/, (req, res, next) => {
+  const indexPath = path.join(CLIENT_DIST, 'index.html');
+  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+  next(); // no build present (local dev without `npm run build`) — just 404 normally
+});
+
+// ── Global Error Handler (must stay last) ────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error('🔴 Unhandled server error:', err);
   res.status(500).json({

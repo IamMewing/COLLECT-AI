@@ -12,6 +12,7 @@ export interface Invoice {
   relationship_score: number;
   historical_on_time_rate: number;
   scenario?: string;
+  status?: 'active' | 'paid';
 }
 
 export interface RiskAssessment {

@@ -41,6 +41,13 @@ export async function createInvoice(payload: {
   return data.invoice;
 }
 
+export async function markInvoicePaid(invoiceId: string): Promise<{ invoice_id: string; status: 'paid' }> {
+  const res = await fetch(`${API_BASE}/agent/invoices/${encodeURIComponent(invoiceId)}/mark-paid`, {
+    method: 'POST',
+  });
+  return handleResponse(res);
+}
+
 export async function runSweep(invoice?: Invoice): Promise<SweepResult> {
   const res = await fetch(`${API_BASE}/agent/sweep`, {
     method: 'POST',

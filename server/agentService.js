@@ -36,11 +36,11 @@ function callAgentBridge(action, payload) {
     let stderrData = '';
 
     child.stdout.on('data', (chunk) => {
-      stdoutData += chunk.toString();
+      stdoutData += chunk.toString('utf8');
     });
 
     child.stderr.on('data', (chunk) => {
-      stderrData += chunk.toString();
+      stderrData += chunk.toString('utf8');
     });
 
     child.on('error', (err) => {

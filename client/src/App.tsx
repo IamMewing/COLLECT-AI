@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError } from './types';
-import { fetchInvoices, runSweep, approveAndExecute } from './api';
+import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid } from './api';
 import { Header } from './components/Header';
 import { PipelineFlow } from './components/PipelineFlow';
 import { InvoiceSelector } from './components/InvoiceSelector';
@@ -20,6 +20,7 @@ export const App: React.FC = () => {
   const [isApproving, setIsApproving] = useState<boolean>(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [showAddInvoice, setShowAddInvoice] = useState<boolean>(false);
+  const [isMarkingPaid, setIsMarkingPaid] = useState<boolean>(false);
 
   // Load sample invoices from server
   const loadInvoices = useCallback(async () => {
@@ -136,6 +137,21 @@ export const App: React.FC = () => {
     handleSelectInvoice(invoice);
   };
 
+  const handleMarkPaid = async (invoice: Invoice) => {
+    setIsMarkingPaid(true);
+    try {
+      await markInvoicePaid(invoice.invoice_id);
+      // Reflect the paid state immediately in the selected invoice, rather
+      // than waiting on a full refetch, so the UI updates without a flicker.
+      setSelectedInvoice({ ...invoice, status: 'paid' });
+      await loadInvoices();
+    } catch (err) {
+      console.error('Failed to mark invoice paid:', err);
+    } finally {
+      setIsMarkingPaid(false);
+    }
+  };
+
   return (
     <div className="app-shell">
       <AmbientBackground />
@@ -235,6 +251,8 @@ export const App: React.FC = () => {
           onRunSweep={handleRunSweep}
           isSweeping={isSweeping}
           onAddInvoice={() => setShowAddInvoice(true)}
+          onMarkPaid={handleMarkPaid}
+          isMarkingPaid={isMarkingPaid}
         />
 
         {/* Human-in-the-Loop Approval Gate (Single-column Stacked) */}

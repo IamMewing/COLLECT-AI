@@ -15,6 +15,13 @@ import os
 import json
 from pathlib import Path
 
+# Force UTF-8 on Windows where piped stdout defaults to cp1252,
+# which causes mojibake (e.g. â€™ instead of ') in Gemini-generated text.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
+
 # Ensure root directory is in sys.path so 'agent' can be imported
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:

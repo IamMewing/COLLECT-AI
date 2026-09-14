@@ -121,7 +121,10 @@ def build_draft_agent():
                 "You draft a short, human-sounding follow-up message to a client "
                 "about an overdue invoice, matching the requested tone and channel. "
                 "Never sound like a form letter or threaten legal action. Keep it "
-                "under 120 words. Return subject, body, and channel as structured output."
+                "under 120 words. Return subject, body, and channel as structured output. "
+                "IMPORTANT: Never use bracketed placeholders such as [Your Name], [Name], "
+                "[Company], or similar. Always sign off with 'The Accounts Team' — never "
+                "leave any placeholder that would need to be filled in manually."
             ),
             structured_output_model=DraftedMessage,
         )

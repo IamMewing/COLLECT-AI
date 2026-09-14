@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import type { Invoice } from '../types';
-import { Zap, TrendingUp } from 'lucide-react';
+import { Zap, TrendingUp, CheckCircle2 } from 'lucide-react';
 
 interface InvoiceSelectorProps {
   invoices: Invoice[];
@@ -9,6 +9,8 @@ interface InvoiceSelectorProps {
   onRunSweep: (inv: Invoice) => void;
   isSweeping: boolean;
   onAddInvoice?: () => void;
+  onMarkPaid?: (inv: Invoice) => void;
+  isMarkingPaid?: boolean;
 }
 
 const fmtINR = (n: number) => '₹' + n.toLocaleString('en-IN');
@@ -51,12 +53,13 @@ const MetricTile: React.FC<{
 };
 
 export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
-  invoices, selectedInvoice, onSelectInvoice, onRunSweep, isSweeping, onAddInvoice,
+  invoices, selectedInvoice, onSelectInvoice, onRunSweep, isSweeping, onAddInvoice, onMarkPaid, isMarkingPaid,
 }) => {
   const onSpot = useSpotlight();
   if (!selectedInvoice) return null;
 
   const inv = selectedInvoice;
+  const isPaid = inv.status === 'paid';
   const overdueColor =
     inv.days_overdue > 30 ? 'var(--critical)' : inv.days_overdue > 10 ? 'var(--warning)' : 'var(--text-primary)';
   const remColor = inv.ignored_reminders >= 2 ? 'var(--critical)' : inv.ignored_reminders >= 1 ? 'var(--warning)' : 'var(--text-primary)';
@@ -67,20 +70,41 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
         <div>
           <div className="mono-label" style={{ marginBottom: 6 }}>Active Ledger Entry Under Surveillance</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
             <h2 className="display-title" style={{ fontSize: '1.7rem' }}>{inv.client_name}</h2>
             <span className="badge badge-neutral">{inv.invoice_id}</span>
+            {isPaid && (
+              <span className="badge badge-healthy">
+                <CheckCircle2 size={12} /> PAID — CLOSED
+              </span>
+            )}
           </div>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => onRunSweep(inv)}
-          disabled={isSweeping}
-          style={{ minWidth: 210 }}
-        >
-          {isSweeping ? <><span className="spinner" style={{ borderTopColor: '#1A1300' }} /> Reasoning Sweep…</>
-                      : <><Zap size={16} /> Run Autonomous Sweep</>}
-        </button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {onMarkPaid && !isPaid && (
+            <button
+              type="button"
+              className="btn btn-neutral"
+              onClick={() => onMarkPaid(inv)}
+              disabled={isMarkingPaid}
+              title="Confirm you've received payment for this invoice — the agent will stop chasing it."
+            >
+              {isMarkingPaid ? <span className="spinner" /> : <CheckCircle2 size={16} />}
+              <span>Mark as Paid</span>
+            </button>
+          )}
+          <button
+            className="btn btn-primary"
+            onClick={() => onRunSweep(inv)}
+            disabled={isSweeping || isPaid}
+            style={{ minWidth: 210 }}
+            title={isPaid ? 'This invoice is already marked paid — nothing to chase.' : undefined}
+          >
+            {isPaid ? <><CheckCircle2 size={16} /> Already Settled</>
+              : isSweeping ? <><span className="spinner" style={{ borderTopColor: '#1A1300' }} /> Reasoning Sweep…</>
+              : <><Zap size={16} /> Run Autonomous Sweep</>}
+          </button>
+        </div>
       </div>
 
       {/* metric grid */}
@@ -108,8 +132,10 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
               key={i.invoice_id}
               className={`invoice-chip ${i.invoice_id === inv.invoice_id ? 'active' : ''}`}
               onClick={() => onSelectInvoice(i)}
+              style={i.status === 'paid' ? { opacity: 0.55 } : undefined}
             >
               {i.invoice_id === inv.invoice_id && <span className="pulse-dot" style={{ width: 6, height: 6, color: 'var(--gold)' }} />}
+              {i.status === 'paid' && <CheckCircle2 size={12} color="var(--healthy)" />}
               {i.invoice_id} · {i.client_name} · <span className="chip-amt">{fmtShort(i.amount)}</span>
             </button>
           ))}

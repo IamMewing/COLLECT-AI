@@ -1,6 +1,6 @@
 {
   "Meridian Design Co.": {
-    "relationship_score": 67,
+    "relationship_score": 66,
     "preferred_tone": null,
     "interaction_history": [
       {
@@ -57,6 +57,21 @@
         "date": "2026-09-14T16:37:26.386446+00:00",
         "action": "approved_and_sent",
         "outcome": "The current tone is professional and firm, which is appropriate for 34 days past due. No shift is needed yet; wait for their response before escalating to a more urgent or formal tone."
+      },
+      {
+        "date": "2026-09-14T17:12:43.010100+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Maintain the current balance of professionalism and firmness, but consider escalating to a direct phone call if there is no response within 48 hours."
+      },
+      {
+        "date": "2026-09-14T17:55:11.979235+00:00",
+        "action": "approved_and_sent",
+        "outcome": "The tone is appropriate for 34 days past due. No shift needed; continue to be firm but professional. If there is no response to this email, the next step should be a phone call rather than another email."
+      },
+      {
+        "date": "2026-09-14T18:00:32.297349+00:00",
+        "action": "rejected_by_reviewer",
+        "outcome": "Message rejected by human reviewer."
       }
     ],
     "total_invoices": 1,
@@ -83,6 +98,34 @@
         "date": "2026-09-14T16:25:17.032211+00:00",
         "action": "approved_and_sent",
         "outcome": "Reflection unavailable due to a temporary service issue."
+      }
+    ],
+    "total_invoices": 1,
+    "on_time_count": 1
+  },
+  "Monarch Studios": {
+    "relationship_score": 75,
+    "preferred_tone": null,
+    "interaction_history": [
+      {
+        "date": "2026-09-14T18:02:32.289528+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Maintain the current professional and helpful tone. It is well-balanced for an initial follow-up."
+      },
+      {
+        "date": "2026-09-14T18:16:10.069376+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Maintain current professional and collaborative tone."
+      },
+      {
+        "date": "2026-09-14T18:58:25.300337+00:00",
+        "action": "approved_and_sent",
+        "outcome": "The tone is currently professional and polite, which is appropriate for a first follow-up. Continue with this balanced approach for the next outreach, but consider escalating to a phone call if there is no response within 3-5 business days given the significant size of the invoice."
+      },
+      {
+        "date": "2026-09-14T19:00:02.133128+00:00",
+        "action": "approved_and_sent",
+        "outcome": "Maintain current professional and collaborative tone."
       }
     ],
     "total_invoices": 1,

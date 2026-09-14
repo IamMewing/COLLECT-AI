@@ -1,26 +1,17 @@
 import React, { useEffect, useRef } from 'react';
 
-/**
- * InteractionLayer — native OS pointer + EXACTLY 4 colored echo-copies of
- * a bold pointer/dart icon that chain-follow the cursor with increasing
- * lag (each echo trails the one in front of it, not the raw mouse) —
- * a fixed, bounded set, never spawned/destroyed, so there is no growing
- * "comet tail." Plus magnetic hover on primary buttons.
- *
- * Colors are strictly the site's 4 signal tokens, one per echo, fixed.
- */
-
 const ECHO_COLORS = [
-  'rgba(255,210,63,ALPHA)',  // --gold      (closest to the real cursor)
-  'rgba(0,229,199,ALPHA)',   // --healthy
-  'rgba(255,59,107,ALPHA)',  // --critical
-  'rgba(255,159,28,ALPHA)',  // --warning   (farthest / tail)
+  'rgba(255,210,63,ALPHA)',
+  'rgba(0,229,199,ALPHA)',
+  'rgba(255,59,107,ALPHA)',
+  'rgba(255,159,28,ALPHA)',
 ];
 
-// Simple, clean arrow-cursor dart — sharp corners, matches a standard
-// OS pointer silhouette. No rounding, no extra notches.
+// The real classic OS arrow-cursor silhouette — thin body, tip top-left,
+// straight left edge, small angled barb/notch on the right. This is what
+// an actual Windows/Mac pointer looks like, not a wide dart shape.
 const POINTER_PATH: [number, number][] = [
-  [0, 0], [30, 20], [12, 24], [16, 42],
+  [0, 0], [0, 16], [4, 12.5], [6.5, 18], [8.5, 17], [6, 11.5], [11, 11.5],
 ];
 
 function drawPointerGhost(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, alpha: number, color: string) {
@@ -37,9 +28,11 @@ function drawPointerGhost(ctx: CanvasRenderingContext2D, x: number, y: number, s
 }
 
 const ECHO_COUNT = 4;
-// Each echo lags further behind the one in front of it — lower factor = more lag.
 const LERP_FACTORS = [0.32, 0.24, 0.18, 0.13];
-const SCALES = [1.0, 0.88, 0.76, 0.64];
+// This shape's own coordinates are much smaller (~11x18) than the old dart
+// (~30x42), so scale multipliers are boosted proportionally to render at
+// the same on-screen size as before.
+const SCALES = [2.2, 1.9, 1.6, 1.3];
 const ALPHAS = [0.85, 0.72, 0.58, 0.44];
 
 export const InteractionLayer: React.FC = () => {
@@ -60,7 +53,7 @@ export const InteractionLayer: React.FC = () => {
     if (!ctx) return;
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduced) return; // native pointer only, no trail — respects the setting
+    if (reduced) return;
 
     let w = (canvas.width = window.innerWidth);
     let h = (canvas.height = window.innerHeight);
@@ -71,8 +64,6 @@ export const InteractionLayer: React.FC = () => {
       mouseRef.current.x = e.clientX;
       mouseRef.current.y = e.clientY;
       if (!mouseRef.current.active) {
-        // First-ever move: snap all echoes straight to the cursor instead of
-        // sliding in from (-9999,-9999) across the whole screen.
         echoesRef.current.forEach((ec) => { ec.x = e.clientX; ec.y = e.clientY; });
         mouseRef.current.active = true;
       }
@@ -89,9 +80,6 @@ export const InteractionLayer: React.FC = () => {
       const { x, y, active } = mouseRef.current;
 
       if (active) {
-        // Chain-follow: echo[0] lerps toward the cursor, echo[1] lerps
-        // toward echo[0]'s position, echo[2] toward echo[1], etc. — a
-        // "snake" with 4 fixed links, never more, never fewer.
         const echoes = echoesRef.current;
         let targetX = x, targetY = y;
         for (let i = 0; i < ECHO_COUNT; i++) {
@@ -102,7 +90,6 @@ export const InteractionLayer: React.FC = () => {
         }
       }
 
-      // ── Magnetic hover: all DOM reads/writes gated to once per frame ──
       if (t - magnetRefreshRef.current > 500) {
         magnetElsRef.current = Array.from(document.querySelectorAll<HTMLElement>('button.btn'));
         magnetRefreshRef.current = t;
@@ -122,7 +109,6 @@ export const InteractionLayer: React.FC = () => {
         }
       }
 
-      // ── Draw exactly 4 echoes, tail-to-head so the nearest one sits on top ──
       ctx.clearRect(0, 0, w, h);
       if (active) {
         const boost = hoveringRef.current ? 1.25 : 1;

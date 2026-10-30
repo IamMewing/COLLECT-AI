@@ -139,3 +139,50 @@ def approve_and_execute(
 
     return {"status": "sent", "send_result": send_result, "reflection": reflection}
 
+
+def record_payment_confirmed(
+    client_name: str | None,
+    invoice: dict | None = None,
+    days_overdue: int | None = None,
+) -> dict:
+    """Called when a PayPal webhook reports INVOICING.INVOICE.PAID — this is the
+    closed loop: a real payment event, not a human clicking a button, triggers
+    the agent's reflection and updates persistent client memory.
+
+    Tries a genuine LLM reflection first (the agent reasons about the fact that
+    its own outreach led to a real payment); falls back to a deterministic
+    positive Reflection if the model call fails for any reason (missing API
+    key/credits, network hiccup) so a webhook firing mid-demo never 500s.
+    """
+    c_name = client_name or "Unknown Client"
+    context = (
+        f"A collections outreach was sent for client \"{c_name}\""
+        + (f", invoice overdue by {days_overdue} days" if days_overdue is not None else "")
+        + ". PayPal has just confirmed the invoice was paid IN FULL via a real "
+        "payment event (not a manual override). Reflect on this outcome: was "
+        "the earlier approach effective, and how should this shape future tone "
+        "and the client's relationship score (this should be a clearly positive "
+        "delta — the agent's handling worked)."
+    )
+
+    try:
+        reflect_agent = build_reflect_agent()
+        reflect_result = reflect_agent(context)
+        reflection: Reflection = reflect_result.structured_output
+    except Exception as exc:  # noqa: BLE001 - never let a webhook handler 500 the demo
+        print(f"[PAYMENT_CONFIRMED] LLM reflection failed ({exc}) — using deterministic fallback.", flush=True)
+        reflection = Reflection(
+            was_best_decision=True,
+            suggested_tone_shift="Client paid in full via PayPal — outreach approach validated.",
+            suggested_relationship_delta=5,
+        )
+
+    record = update_client_memory(
+        c_name,
+        reflection,
+        action_taken="payment_received_via_paypal",
+        invoice=invoice,
+    )
+
+    return {"status": "closed", "reflection": reflection, "client_memory": record}
+

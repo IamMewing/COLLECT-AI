@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Brain,
   History,
+  ExternalLink,
 } from 'lucide-react';
 
 interface ApprovalGateProps {
@@ -587,6 +588,32 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Real PayPal Sandbox Invoice Link — present only when PayPal is
+              configured and invoice creation succeeded for this approval */}
+          {approveResult.paypal_payment_link && (
+            <a
+              href={approveResult.paypal_payment_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '12px 16px',
+                background: 'rgba(0, 112, 186, 0.08)',
+                border: '1px solid rgba(0, 112, 186, 0.35)',
+                borderRadius: '6px',
+                textDecoration: 'none',
+                color: 'var(--text-primary)',
+              }}
+            >
+              <ExternalLink size={15} color="#0070BA" />
+              <span style={{ fontFamily: 'var(--font-sans)', fontSize: '0.86rem' }}>
+                <strong>Real PayPal sandbox invoice sent</strong> — open the live payment link
+              </span>
+            </a>
           )}
 
           {/* Client Memory Persistence Notice */}

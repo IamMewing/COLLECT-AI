@@ -22,3 +22,4 @@ public/assets/
 # Runtime-generated invoice store (created by the server, not source)
 server/user_invoices.json
 server/invoice_status.json
+server/paypal_invoices.json

@@ -66,6 +66,9 @@ export interface ApproveResult {
     status: string;
     channel: string;
   };
+  /** Real PayPal sandbox payment link, when PayPal is configured and the
+   * invoice creation call succeeded. Null otherwise (graceful fallback). */
+  paypal_payment_link?: string | null;
 }
 
 export interface ApiError {

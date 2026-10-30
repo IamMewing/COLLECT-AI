@@ -113,7 +113,24 @@ async function approveAndExecute(draft, approved, editedBody = null, clientName 
   });
 }
 
+/**
+ * Closes the loop: called when a PayPal webhook confirms an invoice was
+ * actually paid. Runs the agent's reflection (real LLM reasoning, or a
+ * deterministic mock-mode equivalent) and updates persistent client memory —
+ * a real payment event driving the agent's state, not a human checkbox.
+ *
+ * @param {string|null} clientName
+ * @param {object|null} invoice
+ */
+async function confirmPayment(clientName, invoice = null) {
+  return callAgentBridge('payment_confirmed', {
+    client_name: clientName,
+    invoice,
+  });
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
+  confirmPayment,
 };

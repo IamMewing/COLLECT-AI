@@ -109,7 +109,8 @@ def mock_run_sweep(invoice: dict) -> dict:
                 f"Real drafts will be written in your voice, tone-matched to this "
                 f"client's history.]\n\n"
                 f"Invoice amount: INR {invoice['amount']:,.0f}, "
-                f"{invoice['days_overdue']} days overdue."
+                f"{invoice['days_overdue']} days overdue.\n\n"
+                f"{{{{PAYMENT_LINK}}}}"
             ),
             channel=plan.channel if plan.channel in ("email", "whatsapp") else "email",
         )
@@ -154,3 +155,20 @@ def mock_approve_and_execute(
     update_client_memory(c_name, reflection, action_taken="approved_and_sent", invoice=invoice)
 
     return {"status": "sent (mock)", "reflection": reflection}
+
+
+def mock_payment_confirmed(client_name: str | None, invoice: dict | None = None) -> dict:
+    """Mock version of execute.record_payment_confirmed — deterministic, no LLM call.
+
+    Mirrors what the real PayPal-webhook-triggered reflection does: a positive,
+    fixed relationship-score bump and an interaction-history entry, so the
+    closed-loop demo works identically whether MODEL_PROVIDER is configured or not.
+    """
+    c_name = client_name or "Unknown Client"
+    reflection = Reflection(
+        was_best_decision=True,
+        suggested_tone_shift="[MOCK] Client paid in full via PayPal — outreach approach validated.",
+        suggested_relationship_delta=5,
+    )
+    record = update_client_memory(c_name, reflection, action_taken="payment_received_via_paypal", invoice=invoice)
+    return {"status": "closed", "reflection": reflection, "client_memory": record}

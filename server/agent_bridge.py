@@ -34,8 +34,10 @@ USE_MOCK = os.environ.get("USE_MOCK", os.environ.get("COLLECT_AI_MOCK", "false")
 from agent import (
     mock_run_sweep,
     mock_approve_and_execute,
+    mock_payment_confirmed,
     run_sweep,
     approve_and_execute,
+    record_payment_confirmed,
     DraftedMessage,
 )
 
@@ -181,6 +183,33 @@ def handle_approve(payload: dict) -> dict:
     return serialized_outcome
 
 
+def handle_payment_confirmed(payload: dict) -> dict:
+    """Triggered by a PayPal webhook (INVOICING.INVOICE.PAID) relayed from Express.
+
+    This is the closed loop: a real payment event — not a human clicking
+    'mark paid' — runs the agent's reflection and updates persistent client
+    memory. Deliberately model-agnostic at the dispatch layer: mock mode uses
+    a deterministic positive reflection, real mode tries an LLM reflection
+    with its own internal fallback (see agent/execute.py).
+    """
+    from agent.memory import get_client_memory, has_client_memory
+
+    client_name = payload.get("client_name")
+    invoice = payload.get("invoice")
+    days_overdue = invoice.get("days_overdue") if isinstance(invoice, dict) else None
+
+    if USE_MOCK:
+        outcome = mock_payment_confirmed(client_name, invoice=invoice)
+    else:
+        outcome = record_payment_confirmed(client_name, invoice=invoice, days_overdue=days_overdue)
+
+    return {
+        "status": outcome.get("status"),
+        "reflection": to_dict(outcome.get("reflection")),
+        "client_memory": get_client_memory(client_name) if client_name and has_client_memory(client_name) else outcome.get("client_memory"),
+    }
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -199,8 +228,10 @@ def main():
                 res = handle_sweep(payload)
             elif action == "approve":
                 res = handle_approve(payload)
+            elif action == "payment_confirmed":
+                res = handle_payment_confirmed(payload)
             else:
-                raise ValueError(f"Unknown action '{action}'. Valid actions are 'sweep' and 'approve'.")
+                raise ValueError(f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', and 'payment_confirmed'.")
 
         json.dump(res, sys.stdout)
         sys.stdout.flush()

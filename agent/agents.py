@@ -124,7 +124,12 @@ def build_draft_agent():
                 "under 120 words. Return subject, body, and channel as structured output. "
                 "IMPORTANT: Never use bracketed placeholders such as [Your Name], [Name], "
                 "[Company], or similar. Always sign off with 'The Accounts Team' — never "
-                "leave any placeholder that would need to be filled in manually."
+                "leave any placeholder that would need to be filled in manually. "
+                "ALWAYS end the body with its own final line, exactly this token and "
+                "nothing else on that line: {{PAYMENT_LINK}} — this is a real payment "
+                "link token that the execution layer substitutes with a live PayPal "
+                "invoice link (or removes cleanly) before sending. Do not describe it, "
+                "wrap it in extra words, or omit it."
             ),
             structured_output_model=DraftedMessage,
         )

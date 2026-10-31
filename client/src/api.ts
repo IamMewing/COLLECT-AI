@@ -76,3 +76,12 @@ export async function checkHealth(): Promise<{ status: string; service: string; 
   const res = await fetch(`${API_BASE}/health`);
   return handleResponse(res);
 }
+
+export async function checkPaypalStatus(): Promise<{
+  configured: boolean;
+  environment: string;
+  webhook_configured: boolean;
+}> {
+  const res = await fetch(`${API_BASE}/paypal/status`);
+  return handleResponse(res);
+}

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError } from './types';
-import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid } from './api';
+import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, checkPaypalStatus } from './api';
 import { Header } from './components/Header';
 import { PipelineFlow } from './components/PipelineFlow';
+import { InvoiceGrid } from './components/InvoiceGrid';
 import { InvoiceSelector } from './components/InvoiceSelector';
 import { ApprovalGate } from './components/ApprovalGate';
 import { AmbientBackground } from './components/AmbientBackground';
@@ -21,6 +22,13 @@ export const App: React.FC = () => {
   const [error, setError] = useState<ApiError | null>(null);
   const [showAddInvoice, setShowAddInvoice] = useState<boolean>(false);
   const [isMarkingPaid, setIsMarkingPaid] = useState<boolean>(false);
+  const [paypalConfigured, setPaypalConfigured] = useState<boolean>(false);
+
+  useEffect(() => {
+    checkPaypalStatus()
+      .then((s) => setPaypalConfigured(s.configured))
+      .catch(() => setPaypalConfigured(false));
+  }, []);
 
   // Load sample invoices from server
   const loadInvoices = useCallback(async () => {
@@ -242,6 +250,17 @@ export const App: React.FC = () => {
           onRetry={selectedInvoice ? () => handleRunSweep(selectedInvoice) : undefined}
         />
         </div>
+
+        {/* Portfolio-wide AG Grid table — sortable/filterable overview of
+            every invoice, showing live PayPal-closed vs manually-closed
+            status at a glance; clicking a row drives the same selection
+            state as the chip tape below. */}
+        <InvoiceGrid
+          invoices={invoices}
+          selectedInvoiceId={selectedInvoice?.invoice_id}
+          onSelectInvoice={handleSelectInvoice}
+          paypalConfigured={paypalConfigured}
+        />
 
         {/* Invoice Surveillance Selector (Single-column Stacked) */}
         <InvoiceSelector

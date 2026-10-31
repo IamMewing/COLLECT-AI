@@ -90,11 +90,22 @@ function savePaypalInvoiceMap(map) {
 /**
  * Marks an invoice paid and persists it — shared by the human "mark paid"
  * button and the PayPal webhook handler, so both paths behave identically.
+ * Records *how* it was closed ('manual' vs 'paypal') so the UI can show the
+ * closed-loop story, not just a flat paid/unpaid flag.
  */
-function markInvoicePaidInternal(invoiceId) {
+function markInvoicePaidInternal(invoiceId, via = 'manual') {
   const statusMap = loadInvoiceStatus();
-  statusMap[invoiceId] = 'paid';
+  statusMap[invoiceId] = { status: 'paid', via, at: new Date().toISOString() };
   saveInvoiceStatus(statusMap);
+}
+
+/** Normalizes a statusMap entry, which may be the legacy plain string 'paid'
+ * (from before `paid_via` tracking existed) or the current {status, via, at}
+ * object, into { status, paid_via }. */
+function normalizeStatusEntry(entry) {
+  if (!entry) return { status: 'active', paid_via: undefined };
+  if (typeof entry === 'string') return { status: entry, paid_via: undefined };
+  return { status: entry.status || 'active', paid_via: entry.via };
 }
 
 /** Replaces the agent's {{PAYMENT_LINK}} token with a real link, or removes
@@ -167,7 +178,7 @@ app.get('/api/health', (req, res) => {
 app.get('/api/agent/invoices', (req, res) => {
   const userInvoices = loadUserInvoices();
   const statusMap = loadInvoiceStatus();
-  const withStatus = (inv) => ({ ...inv, status: statusMap[inv.invoice_id] || 'active' });
+  const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
   res.json({ invoices: [...userInvoices, ...SAMPLE_INVOICES].map(withStatus) });
 });
 
@@ -400,7 +411,7 @@ app.post('/api/paypal/webhook', async (req, res) => {
       return res.status(200).json({ received: true, mapped: false });
     }
 
-    markInvoicePaidInternal(mapping.invoice_id);
+    markInvoicePaidInternal(mapping.invoice_id, 'paypal');
     console.log(`✅ [PayPal webhook] Invoice ${mapping.invoice_id} (${mapping.client_name}) marked paid automatically.`);
 
     const allInvoices = [...loadUserInvoices(), ...SAMPLE_INVOICES];

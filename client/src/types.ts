@@ -13,6 +13,10 @@ export interface Invoice {
   historical_on_time_rate: number;
   scenario?: string;
   status?: 'active' | 'paid';
+  /** How this invoice was closed, when status is 'paid': 'paypal' means a
+   * real PayPal webhook confirmed payment automatically; 'manual' means a
+   * human clicked "Mark as Paid". Undefined for still-active invoices. */
+  paid_via?: 'manual' | 'paypal';
 }
 
 export interface RiskAssessment {

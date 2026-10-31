@@ -75,7 +75,8 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
             <span className="badge badge-neutral">{inv.invoice_id}</span>
             {isPaid && (
               <span className="badge badge-healthy">
-                <CheckCircle2 size={12} /> PAID — CLOSED
+                <CheckCircle2 size={12} />
+                {inv.paid_via === 'paypal' ? 'PAID VIA PAYPAL — CLOSED AUTOMATICALLY' : 'PAID — CLOSED'}
               </span>
             )}
           </div>

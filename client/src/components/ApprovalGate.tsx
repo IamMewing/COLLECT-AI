@@ -590,8 +590,8 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
             </div>
           )}
 
-          {/* Real PayPal Sandbox Invoice Link — present only when PayPal is
-              configured and invoice creation succeeded for this approval */}
+          {/* Real PayPal Sandbox Payment Link — present only when PayPal is
+              configured and order creation succeeded for this approval */}
           {approveResult.paypal_payment_link && (
             <a
               href={approveResult.paypal_payment_link}
@@ -611,7 +611,7 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
             >
               <ExternalLink size={15} color="#0070BA" />
               <span style={{ fontFamily: 'var(--font-sans)', fontSize: '0.86rem' }}>
-                <strong>Real PayPal sandbox invoice sent</strong> — open the live payment link
+                <strong>Real PayPal sandbox payment link created</strong> — open to approve & pay as the buyer
               </span>
             </a>
           )}

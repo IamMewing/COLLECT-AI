@@ -67,24 +67,24 @@ function saveInvoiceStatus(map) {
   fs.writeFileSync(INVOICE_STATUS_PATH, JSON.stringify(map, null, 2));
 }
 
-// ── PayPal invoice mapping: paypal_invoice_id -> { invoice_id, client_name } ─
-// This is how an incoming webhook (which only knows PayPal's invoice id)
+// ── PayPal order mapping: paypal_order_id -> { invoice_id, client_name } ────
+// This is how an incoming webhook (which only knows PayPal's order id)
 // finds its way back to our internal invoice record.
-const PAYPAL_INVOICES_PATH = path.join(__dirname, 'paypal_invoices.json');
+const PAYPAL_ORDERS_PATH = path.join(__dirname, 'paypal_orders.json');
 
-function loadPaypalInvoiceMap() {
+function loadPaypalOrderMap() {
   try {
-    if (fs.existsSync(PAYPAL_INVOICES_PATH)) {
-      return JSON.parse(fs.readFileSync(PAYPAL_INVOICES_PATH, 'utf-8'));
+    if (fs.existsSync(PAYPAL_ORDERS_PATH)) {
+      return JSON.parse(fs.readFileSync(PAYPAL_ORDERS_PATH, 'utf-8'));
     }
   } catch (e) {
-    console.error('Could not read paypal_invoices.json:', e.message);
+    console.error('Could not read paypal_orders.json:', e.message);
   }
   return {};
 }
 
-function savePaypalInvoiceMap(map) {
-  fs.writeFileSync(PAYPAL_INVOICES_PATH, JSON.stringify(map, null, 2));
+function savePaypalOrderMap(map) {
+  fs.writeFileSync(PAYPAL_ORDERS_PATH, JSON.stringify(map, null, 2));
 }
 
 /**
@@ -297,42 +297,36 @@ app.post('/api/agent/approve', async (req, res) => {
       console.log(`📝 Human edited the message body before approving.`);
     }
 
-    // ── Real PayPal sandbox invoice, created only on approval ────────────────
+    // ── Real PayPal sandbox order, created only on approval ──────────────────
     // This is the agentic-commerce step: the plan/draft agents already decided
     // *to* act; this is where that decision becomes a real, payable PayPal
-    // invoice instead of just an email. Fails soft — any PayPal error just
-    // means no payment link gets woven in, it never blocks approval.
+    // link instead of just an email. Fails soft — any PayPal error just means
+    // no payment link gets woven in, it never blocks approval.
     let paymentLink = null;
     if (approved && paypalService.isConfigured() && invoice && invoice.amount) {
       try {
-        const clientEmail = invoice.client_email || process.env.PAYPAL_DEMO_BUYER_EMAIL;
-        if (!clientEmail) {
-          console.warn('⚠️  [PayPal] No client_email on the invoice and PAYPAL_DEMO_BUYER_EMAIL is unset — skipping real invoice creation.');
-        } else {
-          // Demo invoices are seeded in INR; sandbox needs a currency the test
-          // merchant account accepts. A rough fixed conversion is fine here —
-          // this is a sandbox demo amount, never real billing.
-          const inrPerUsd = Number(process.env.PAYPAL_DEMO_INR_PER_USD) || 83;
-          const amountUsd = Number(invoice.amount) / inrPerUsd;
+        // Demo invoices are seeded in INR; sandbox needs a currency the test
+        // merchant account accepts. A rough fixed conversion is fine here —
+        // this is a sandbox demo amount, never real billing.
+        const inrPerUsd = Number(process.env.PAYPAL_DEMO_INR_PER_USD) || 83;
+        const amountUsd = Number(invoice.amount) / inrPerUsd;
 
-          const ppResult = await paypalService.createAndSendInvoice({
-            invoiceId: invoice.invoice_id,
-            clientName: invoice.client_name,
-            clientEmail,
-            amount: amountUsd,
-            currency: process.env.PAYPAL_CURRENCY || 'USD',
-            note: `CollectAI follow-up — ${draft.subject}`,
-          });
-          paymentLink = ppResult.paymentLink;
+        const ppResult = await paypalService.createAndSendOrder({
+          invoiceId: invoice.invoice_id,
+          clientName: invoice.client_name,
+          amount: amountUsd,
+          currency: process.env.PAYPAL_CURRENCY || 'USD',
+          note: `CollectAI follow-up — ${draft.subject}`,
+        });
+        paymentLink = ppResult.paymentLink;
 
-          const map = loadPaypalInvoiceMap();
-          map[ppResult.paypalInvoiceId] = { invoice_id: invoice.invoice_id, client_name: invoice.client_name };
-          savePaypalInvoiceMap(map);
+        const map = loadPaypalOrderMap();
+        map[ppResult.paypalOrderId] = { invoice_id: invoice.invoice_id, client_name: invoice.client_name };
+        savePaypalOrderMap(map);
 
-          console.log(`💳 [PayPal] Sandbox invoice ${ppResult.paypalInvoiceId} created & sent for ${invoice.invoice_id}. Link: ${paymentLink || '(pending)'}`);
-        }
+        console.log(`💳 [PayPal] Sandbox order ${ppResult.paypalOrderId} created for ${invoice.invoice_id}. Link: ${paymentLink || '(pending)'}`);
       } catch (ppError) {
-        console.error('⚠️  [PayPal] Invoice creation failed — continuing without a real payment link:', ppError.message);
+        console.error('⚠️  [PayPal] Order creation failed — continuing without a real payment link:', ppError.message);
       }
     }
 
@@ -369,10 +363,11 @@ app.get('/api/paypal/status', (req, res) => {
 
 /**
  * POST /api/paypal/webhook
- * PayPal calls this when an invoice event happens. This is what replaces the
- * manual "mark paid" button for real: INVOICING.INVOICE.PAID closes the loop
- * automatically — the invoice is marked paid AND the agent runs a genuine
- * reflection on a real payment event, not a human checkbox.
+ * PayPal calls this when an order event happens. This is what replaces the
+ * manual "mark paid" button for real: when the client approves the order
+ * (CHECKOUT.ORDER.APPROVED), we immediately capture the payment server-side,
+ * and on a successful capture the invoice is marked paid AND the agent runs
+ * a genuine reflection on a real payment event, not a human checkbox.
  *
  * Signature verification needs PAYPAL_WEBHOOK_ID (set once you create the
  * webhook in the Developer Dashboard and copy its ID into .env). Until then,
@@ -396,23 +391,29 @@ app.post('/api/paypal/webhook', async (req, res) => {
     const eventType = event.event_type;
     console.log(`\n📬 [PayPal webhook] Received ${eventType || '(unknown event)'}${verified ? ' [verified]' : ' [unverified]'}`);
 
-    // Always 200 quickly so PayPal doesn't retry-storm us; do the real work
-    // after responding is unnecessary here since this is all fast local I/O.
-    if (eventType !== 'INVOICING.INVOICE.PAID') {
+    // Always 200 quickly so PayPal doesn't retry-storm us.
+    if (eventType !== 'CHECKOUT.ORDER.APPROVED') {
       return res.status(200).json({ received: true, ignored: eventType || 'unknown' });
     }
 
-    const ppInvoiceId = event.resource?.id;
-    const map = loadPaypalInvoiceMap();
-    const mapping = ppInvoiceId ? map[ppInvoiceId] : null;
+    const ppOrderId = event.resource?.id;
+    const map = loadPaypalOrderMap();
+    const mapping = ppOrderId ? map[ppOrderId] : null;
 
     if (!mapping) {
-      console.warn(`⚠️  [PayPal webhook] No internal invoice mapped to PayPal invoice ${ppInvoiceId} — ignoring.`);
+      console.warn(`⚠️  [PayPal webhook] No internal invoice mapped to PayPal order ${ppOrderId} — ignoring.`);
       return res.status(200).json({ received: true, mapped: false });
     }
 
+    // The client approved — now actually capture the funds.
+    const captureResult = await paypalService.captureOrder(ppOrderId);
+    if (captureResult?.status !== 'COMPLETED') {
+      console.warn(`⚠️  [PayPal webhook] Capture for order ${ppOrderId} returned status ${captureResult?.status} — not marking paid.`);
+      return res.status(200).json({ received: true, mapped: true, captured: false, status: captureResult?.status });
+    }
+
     markInvoicePaidInternal(mapping.invoice_id, 'paypal');
-    console.log(`✅ [PayPal webhook] Invoice ${mapping.invoice_id} (${mapping.client_name}) marked paid automatically.`);
+    console.log(`✅ [PayPal webhook] Order ${ppOrderId} captured — invoice ${mapping.invoice_id} (${mapping.client_name}) marked paid automatically.`);
 
     const allInvoices = [...loadUserInvoices(), ...SAMPLE_INVOICES];
     const invoice = allInvoices.find((i) => i.invoice_id === mapping.invoice_id) || null;
@@ -420,7 +421,7 @@ app.post('/api/paypal/webhook', async (req, res) => {
     const closeLoopResult = await confirmPayment(mapping.client_name, invoice);
     console.log(`🔁 [PayPal webhook] Agent reflection closed the loop:`, closeLoopResult.reflection?.suggested_tone_shift || closeLoopResult.status);
 
-    res.status(200).json({ received: true, mapped: true, invoice_id: mapping.invoice_id, closeLoopResult });
+    res.status(200).json({ received: true, mapped: true, captured: true, invoice_id: mapping.invoice_id, closeLoopResult });
   } catch (error) {
     // Still 200 here in spirit-of-webhooks terms would be debatable; 500 is
     // fine since PayPal retries failed webhook deliveries automatically.

@@ -3,9 +3,19 @@
  *
  * This is the piece that turns CollectAI from "an agent that drafts emails"
  * into agentic commerce: when a human approves the agent's drafted message,
- * this module creates and sends a REAL PayPal (sandbox) invoice, and the
- * payment link is woven into the message itself. A PayPal webhook later
- * confirms payment and closes the loop automatically (see server.js).
+ * this module creates a REAL PayPal (sandbox) Order and the approval link is
+ * woven into the message itself. Once the client approves and pays, a PayPal
+ * webhook confirms the capture and closes the loop automatically (see
+ * server.js) — no human has to come back and click "mark paid".
+ *
+ * Uses the PayPal Orders v2 API (Checkout) rather than the Invoicing API.
+ * Functionally this is the same agentic-commerce story — the agent
+ * autonomously creates a real, payable PayPal link for a specific amount —
+ * and it's the API PayPal's own docs recommend for agent/checkout-style
+ * integrations. (We originally built this against the Invoicing API, but
+ * hit a PayPal sandbox-side issue where the Invoicing scope never actually
+ * attached to any app regardless of account/app configuration — see
+ * PAYPAL_SETUP.md for the full troubleshooting trail.)
  *
  * Required env vars (see .env.example):
  *   PAYPAL_CLIENT_ID
@@ -94,76 +104,59 @@ async function ppFetch(path, options = {}) {
     throw err;
   }
 
-  // 204 No Content (e.g. the /send endpoint) has no JSON body
+  // 204 No Content has no JSON body
   if (res.status === 204) return null;
   return res.json();
 }
 
 /**
- * Create a draft invoice in the merchant's PayPal sandbox account.
- * Returns the PayPal invoice id (not the full href).
+ * Creates a PayPal Order (Checkout) for a given amount. Returns the full
+ * order resource, including a `links` array with the payer-facing approval
+ * URL (rel: 'approve') the client opens to log in and approve payment.
  */
-async function createInvoice({ invoiceId, clientName, clientEmail, amount, currency = 'USD', note }) {
+async function createOrder({ invoiceId, clientName, amount, currency = 'USD', note }) {
   const body = {
-    detail: {
-      invoice_number: invoiceId,
-      currency_code: currency,
-      note: note || `CollectAI follow-up for invoice ${invoiceId}`,
-      payment_term: { term_type: 'NET_10' },
-    },
-    invoicer: {
-      name: { given_name: 'CollectAI', surname: 'Accounts' },
-      email_address: process.env.PAYPAL_MERCHANT_EMAIL || undefined,
-    },
-    primary_recipients: [
+    intent: 'CAPTURE',
+    purchase_units: [
       {
-        billing_info: {
-          name: { given_name: clientName || 'Valued Client' },
-          email_address: clientEmail,
-        },
+        reference_id: invoiceId,
+        custom_id: invoiceId,
+        description: (note || `CollectAI follow-up for invoice ${invoiceId}`).slice(0, 127),
+        amount: { currency_code: currency, value: Number(amount).toFixed(2) },
       },
     ],
-    items: [
-      {
-        name: `Invoice ${invoiceId}`,
-        quantity: '1',
-        unit_amount: { currency_code: currency, value: Number(amount).toFixed(2) },
-      },
-    ],
+    application_context: {
+      brand_name: 'CollectAI',
+      user_action: 'PAY_NOW',
+      shipping_preference: 'NO_SHIPPING',
+      return_url: 'https://www.paypal.com',
+      cancel_url: 'https://www.paypal.com',
+    },
   };
 
-  const res = await ppFetch('/v2/invoicing/invoices', { method: 'POST', body: JSON.stringify(body) });
-  // Response has { href: ".../v2/invoicing/invoices/{id}" }
-  const ppInvoiceId = res.href ? res.href.split('/').filter(Boolean).pop() : res.id;
-  return ppInvoiceId;
+  return ppFetch('/v2/checkout/orders', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** Sends a draft invoice to its recipient. PayPal returns 202/204 with no body. */
-async function sendInvoice(ppInvoiceId) {
-  await ppFetch(`/v2/invoicing/invoices/${ppInvoiceId}/send`, {
-    method: 'POST',
-    body: JSON.stringify({ send_to_recipient: true, send_to_invoicer: false }),
-  });
+/** Fetches full order detail, including current status (CREATED/APPROVED/COMPLETED). */
+async function getOrder(orderId) {
+  return ppFetch(`/v2/checkout/orders/${orderId}`, { method: 'GET' });
 }
 
-/** Fetches full invoice detail, including the payer-facing payment link. */
-async function getInvoice(ppInvoiceId) {
-  return ppFetch(`/v2/invoicing/invoices/${ppInvoiceId}`, { method: 'GET' });
+/** Captures an approved order — this is the step that actually moves the money. */
+async function captureOrder(orderId) {
+  return ppFetch(`/v2/checkout/orders/${orderId}/capture`, { method: 'POST' });
 }
 
 /**
- * Full flow: create -> send -> fetch back the payer-facing link.
- * Returns { paypalInvoiceId, paymentLink, status }.
+ * Full flow: create the order and return the payer-facing approval link.
+ * Capture happens later, triggered by the CHECKOUT.ORDER.APPROVED webhook
+ * once the client actually approves it — see server.js.
+ * Returns { paypalOrderId, paymentLink, status }.
  */
-async function createAndSendInvoice({ invoiceId, clientName, clientEmail, amount, currency, note }) {
-  const paypalInvoiceId = await createInvoice({ invoiceId, clientName, clientEmail, amount, currency, note });
-  await sendInvoice(paypalInvoiceId);
-  const detail = await getInvoice(paypalInvoiceId);
-  const paymentLink =
-    detail?.detail?.metadata?.recipient_view_url ||
-    detail?.detail?.metadata?.recipientViewUrl ||
-    null;
-  return { paypalInvoiceId, paymentLink, status: detail?.status || 'SENT' };
+async function createAndSendOrder({ invoiceId, clientName, amount, currency, note }) {
+  const order = await createOrder({ invoiceId, clientName, amount, currency, note });
+  const paymentLink = (order.links || []).find((l) => l.rel === 'approve')?.href || null;
+  return { paypalOrderId: order.id, paymentLink, status: order.status || 'CREATED' };
 }
 
 /**
@@ -209,9 +202,9 @@ async function verifyWebhookSignature(headers, rawBodyString) {
 module.exports = {
   isConfigured,
   getAccessToken,
-  createInvoice,
-  sendInvoice,
-  getInvoice,
-  createAndSendInvoice,
+  createOrder,
+  getOrder,
+  captureOrder,
+  createAndSendOrder,
   verifyWebhookSignature,
 };

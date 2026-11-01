@@ -9,17 +9,20 @@ package.
 
 ## PayPal integration (agentic commerce)
 
-When a human approves the agent's drafted message, the server creates and
-sends a **real PayPal sandbox invoice** via the Invoicing API, and the real
-payment link gets woven into the message the agent drafted (it's instructed
-to always include a `{{PAYMENT_LINK}}` token, which the server substitutes).
-A **PayPal webhook** (`INVOICING.INVOICE.PAID`) then closes the loop
-automatically: the moment the sandbox invoice is paid, the server marks it
-paid and runs the agent's reflection on a real payment event — not a human
-clicking a button. See **[PAYPAL_SETUP.md](./PAYPAL_SETUP.md)** for the
-step-by-step to get your own free sandbox credentials. Everything here
-degrades gracefully with PayPal unconfigured (`GET /api/paypal/status`
-tells you the current state) — the rest of the pipeline still runs.
+When a human approves the agent's drafted message, the server creates a
+**real PayPal sandbox order** via the Orders (Checkout) API, and the real
+approval/payment link gets woven into the message the agent drafted (it's
+instructed to always include a `{{PAYMENT_LINK}}` token, which the server
+substitutes). A **PayPal webhook** (`CHECKOUT.ORDER.APPROVED`) then closes
+the loop automatically: the moment the client approves and the server
+captures the payment, it's marked paid and the agent runs its reflection on
+a real payment event — not a human clicking a button. See
+**[PAYPAL_SETUP.md](./PAYPAL_SETUP.md)** for the step-by-step to get your
+own free sandbox credentials (including why Orders API rather than
+Invoicing — a PayPal sandbox-side permissions issue we hit and
+documented). Everything here degrades gracefully with PayPal unconfigured
+(`GET /api/paypal/status` tells you the current state) — the rest of the
+pipeline still runs.
 
 ## What's here
 

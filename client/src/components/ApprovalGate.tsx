@@ -93,7 +93,7 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {decided ? (
-            <span className={`stamp${sent ? '' : ''}`} style={{ color: sent ? 'var(--mint)' : 'var(--blood)' }}>
+            <span className={`stamp${sent ? '' : ''}`} style={{ color: sent ? 'var(--ok)' : 'var(--warn)' }}>
               {sent ? <><Check size={18} /> Sent</> : <><X size={18} /> Not sent</>}
             </span>
           ) : (
@@ -131,7 +131,7 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
         </div>
         <div className="readout">
           <dt>Chance they pay</dt>
-          <dd style={{ color: probability.probability >= 60 ? 'var(--mint)' : 'var(--blood)' }}>
+          <dd style={{ color: probability.probability >= 60 ? 'var(--ok)' : 'var(--warn)' }}>
             {probability.probability}<small>%</small>
           </dd>
         </div>
@@ -241,7 +241,7 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
                 </div>
                 <div className="readout">
                   <dt>Standing change</dt>
-                  <dd style={{ color: approveResult.reflection.suggested_relationship_delta >= 0 ? 'var(--mint)' : 'var(--blood)' }}>
+                  <dd style={{ color: approveResult.reflection.suggested_relationship_delta >= 0 ? 'var(--ok)' : 'var(--warn)' }}>
                     {approveResult.reflection.suggested_relationship_delta >= 0 ? '+' : ''}
                     {approveResult.reflection.suggested_relationship_delta}
                   </dd>
@@ -264,7 +264,7 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
           )}
 
           {!sent && (
-            <p className="body body--sm" style={{ marginTop: 16, color: 'var(--blood)' }}>
+            <p className="body body--sm" style={{ marginTop: 16, color: 'var(--warn)' }}>
               {approveResult.reason || 'You stopped this one. Nothing was sent.'}
             </p>
           )}

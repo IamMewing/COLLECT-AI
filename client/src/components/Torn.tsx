@@ -1,12 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import { W, H, STEPS, OVER, waveVbY, waveRegistry } from './tornWave';
 
-type Tone = 'acid' | 'ink' | 'bone';
+type Tone = 'acid' | 'ink' | 'pink';
 
 const HEX: Record<Tone, string> = {
-  acid: '#FFE500',
+  acid: '#D9FB5F',
   ink: '#000000',
-  bone: '#F2EFE4',
+  pink: '#FF7BB5',
 };
 
 /**

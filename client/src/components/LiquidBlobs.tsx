@@ -25,8 +25,8 @@ import { W as VB_W, H as VB_H, GLSL_WAVE, waveRegistry } from './tornWave';
  * else on the page changed nothing.
  *
  * So the canvas is a box just big enough to hold the mass, parked over it with
- * a transform. The chain's reach is bounded (see LINK_MAX), which is what makes
- * a fixed-size box possible. Blended area drops by roughly 5x at 1080p, and the
+ * a transform. The trail's length is capped (see MAX_LEN), which is what makes
+ * a bounded box possible. Blended area drops by roughly 5x at 1080p, and the
  * clear and fill shrink with it.
  *
  * ── Motion ────────────────────────────────────────────────────────────────
@@ -37,64 +37,82 @@ import { W as VB_W, H as VB_H, GLSL_WAVE, waveRegistry } from './tornWave';
  * elongates along its own velocity, so the body stretches when thrown.
  */
 
-/** More nodes than the shape strictly needs: a long chain of small steps
- *  merges into a smooth body, where a short chain of big ones reads as a few
- *  circles overlapping. Damping falls off down the chain as well as stiffness,
- *  so the tail keeps its momentum longer than the head and whips round behind
- *  it instead of trailing in a straight line. */
-const CHAIN = [
-  { r: 66, k: 1.000, d: 0.860 }, // head: pinned to the pointer, k unused
-  { r: 62, k: 0.150, d: 0.865 },
-  { r: 58, k: 0.110, d: 0.870 },
-  { r: 54, k: 0.086, d: 0.875 },
-  { r: 49, k: 0.070, d: 0.880 },
-  { r: 44, k: 0.057, d: 0.885 },
-  { r: 38, k: 0.047, d: 0.890 },
-  { r: 32, k: 0.039, d: 0.895 },
-  { r: 25, k: 0.032, d: 0.900 },
-  { r: 18, k: 0.026, d: 0.905 },
-];
-const N = CHAIN.length;
+/**
+ * The mass is laid along the path the pointer just took, not dragged behind it
+ * by springs.
+ *
+ * Springs were the wrong model. Watch the reference closely and the stroke is
+ * clearly a *record*: it lies along the route the cursor travelled, thick at
+ * the head, tapering, pinching off into a round droplet at the far tail, and
+ * it retracts along itself when you stop. A spring chain can approximate that
+ * while moving in a straight line and never gets a corner right — it cuts the
+ * corner, because each node is pulled towards the one ahead rather than
+ * following where it actually went.
+ *
+ * So: keep a short history of pointer positions, resample it by arc length
+ * every frame, and put a metaball at each sample. The shape then follows the
+ * path exactly, the taper is a radius profile rather than an emergent accident,
+ * and dropping points once they age out makes the trail retract on its own when
+ * the pointer stops — which is also what makes it vanish.
+ */
+
+/** Metaballs along the trail. Enough of them that the body is a smooth ribbon
+ *  rather than a row of circles. Cheap, because placing them by arc length
+ *  removes the need for the per-blob stretch the spring version used. */
+const N = 18;
+/** Radius at the head, before viewport scaling. */
+const R_HEAD = 46;
+/** How long a piece of trail survives. This is also what makes the mass
+ *  disappear: stop moving and the whole thing ages out from the tail. */
+const TRAIL_MS = 320;
+/** Longest stretch of path the mass will span, so a fast flick lays down a
+ *  ribbon rather than a streak across the whole screen. */
+const MAX_LEN = 440;
 
 /**
- * How far each node may trail the one ahead of it. Past roughly 0.62x the sum
- * of two radii the summed field no longer clears the isosurface between them
- * and the mass visibly tears into separate droplets — which is what it was
- * doing on a fast flick. Clamping the link keeps it one body at any speed, and
- * as a side effect bounds the chain's total extent, which is what lets the
- * canvas be a fixed size.
+ * Radius along the trail, head (0) to tail (1). It holds nearly full width for
+ * the first third, then falls away — the tail thins faster than the samples
+ * spread, which is what lets the very end pinch off into a separate droplet
+ * the way poured ink does.
  */
-const LINK_MAX = CHAIN.slice(0, -1).map((b, i) => 0.52 * (b.r + CHAIN[i + 1].r));
-/** Worst-case extent of the whole mass: every link at full stretch, plus the
- *  reach of the field around the ends. */
-const SPAN = LINK_MAX.reduce((a, b) => a + b, 0);
-const REACH = Math.sqrt(CHAIN.reduce((a, b) => a + b.r * b.r, 0));
-const MAX_STRETCH = 1.42;
+const profile = (u: number) => {
+  if (u < 0.3) return 1 - 0.1 * (u / 0.3);
+  const v = (u - 0.3) / 0.7;
+  return 0.9 * Math.pow(1 - v, 1.45) + 0.06;
+};
+
+/** Worst-case reach of the summed field, for sizing the canvas. */
+const REACH = R_HEAD * Math.sqrt(
+  Array.from({ length: N }, (_, i) => profile(i / (N - 1)) ** 2).reduce((a, b) => a + b, 0)
+);
 /** How long a still cursor keeps its mass before it starts retracting. Short
  *  enough to read as "gone the moment you stop", long enough to survive the
  *  gap between two pointer events during ordinary movement. */
-const IDLE_AFTER = 130;
+const IDLE_AFTER = 110;
 
 /** What the mass is filled with over each field, chosen so that differencing
  *  it against that field lands on the right colour:
- *    acid field - filled acid -> black    (ink spreading over yellow)
- *    bone field - filled bone -> black    (ink spreading over bone)
- *    ink  field - filled acid -> acid     (yellow over black)
- *  Filling with acid everywhere, which is what this did, differences against
- *  bone to a vivid blue — a colour that appears nowhere in the palette. */
+ *    tonic field - filled tonic -> black   (ink spreading over tonic)
+ *    pink  field - filled pink  -> black   (ink spreading over pink)
+ *    ink   field - filled tonic -> tonic
+ *  Filling with one colour everywhere, which is what this did, differences
+ *  against the other fields to colours that are in no part of the palette. */
 const FILL: Record<string, [number, number, number]> = {
-  acid: [1.0, 0.898, 0.0],
-  bone: [0.949, 0.937, 0.894],
-  ink: [1.0, 0.898, 0.0],
+  acid: [0.851, 0.984, 0.373], // tonic #D9FB5F
+  pink: [1.0, 0.482, 0.710], //  #FF7BB5
+  ink: [0.851, 0.984, 0.373],
 };
-const BOX_AT_FULL_SCALE = Math.ceil(SPAN + 2 * REACH * MAX_STRETCH);
+const BOX_AT_FULL_SCALE = Math.ceil(MAX_LEN + 2 * REACH);
 
 const VERT = `
 attribute vec2 a_pos;
 void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
 `;
 
-/* u_blob: xy = centre in viewport CSS px, z = radius, w = stretch along u_dir */
+/* u_blob: xy = centre in viewport CSS px, z = radius. No per-blob stretch any
+   more — the ribbon's shape comes from where the samples sit on the path, so
+   each iteration is a subtract and a dot instead of a rotate and two scales.
+   That pays for more than twice as many of them. */
 const FRAG = `
 #extension GL_OES_standard_derivatives : enable
 precision highp float;
@@ -108,8 +126,7 @@ uniform vec3 u_colB;     // fill below it
 uniform vec3 u_band;     // divider rect: top, height, element width (CSS px)
 uniform vec3 u_wave;     // its live wave: phase, amplitude, seed
 uniform float u_hasBand; // 1 when the mass straddles a divider
-uniform vec4 u_blob[${N}];
-uniform vec2 u_dir[${N}];
+uniform vec3 u_blob[${N}];
 
 void main() {
   // Fragment -> canvas-local CSS px -> viewport CSS px, which is the space the
@@ -119,13 +136,6 @@ void main() {
   float field = 0.0;
   for (int i = 0; i < ${N}; i++) {
     vec2 d = p - u_blob[i].xy;
-    float s = u_blob[i].w;
-    vec2 dir = u_dir[i];
-    // Rotate into the blob's own frame, then stretch along it. The across-axis
-    // is squeezed by far less than area preservation would ask for: at speed
-    // that turned the mass into a hairline.
-    float across = pow(s, 0.3);
-    d = vec2(dot(d, dir) / s, dot(d, vec2(-dir.y, dir.x)) * across);
     float r = u_blob[i].z;
     field += (r * r) / (dot(d, d) + 1.0);
   }
@@ -233,7 +243,6 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     const uWave = gl.getUniformLocation(prog, 'u_wave');
     const uHasBand = gl.getUniformLocation(prog, 'u_hasBand');
     const uBlob = gl.getUniformLocation(prog, 'u_blob');
-    const uDir = gl.getUniformLocation(prog, 'u_dir');
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -303,21 +312,20 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     };
     resize();
 
-    /* ── physics state ──────────────────────────────────────────────────── */
-    const px = new Float32Array(N);
+    /* ── trail ──────────────────────────────────────────────────────────── */
+    /** Recent pointer path, newest first. Ring-free: it is short, and the
+     *  oldest entries are dropped every frame once they age out. */
+    type Pt = { x: number; y: number; t: number };
+    const trail: Pt[] = [];
+    const px = new Float32Array(N); // resampled positions
     const py = new Float32Array(N);
-    const vx = new Float32Array(N);
-    const vy = new Float32Array(N);
-    const blobData = new Float32Array(N * 4);
-    const dirData = new Float32Array(N * 2);
-    const link = new Float32Array(N); // how extended each node's link is, 0..1
+    const blobData = new Float32Array(N * 3);
 
     let tx = w * 0.5;
     let ty = h * 0.42;
     for (let i = 0; i < N; i++) {
       px[i] = tx;
       py[i] = ty;
-      dirData[i * 2] = 1;
     }
 
     let pointerSeen = false;
@@ -397,20 +405,44 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
        stops being a flourish and starts being an obstruction. So it retreats
        over anything marked quiet and comes straight back on the way out. */
     const QUIET = '[data-quiet], input, textarea, .ag-root-wrapper';
+    /* Magnetism: over something you can actually press, the head is drawn
+       towards the middle of it, so the mass settles onto the control instead
+       of hovering near it. */
+    const MAGNET = 'a, button, .pill, [data-magnet]';
     let quietTarget = 0;
 
     const onMove = (e: PointerEvent) => {
-      tx = e.clientX;
-      ty = e.clientY;
-      pointerSeen = true;
-      lastMove = performance.now();
+      const now = performance.now();
+      let x = e.clientX;
+      let y = e.clientY;
+
       const el = e.target as Element | null;
       quietTarget = el && el.closest && el.closest(QUIET) ? 1 : 0;
+
+      const mag = el && el.closest ? (el.closest(MAGNET) as HTMLElement | null) : null;
+      if (mag && !quietTarget) {
+        const r = mag.getBoundingClientRect();
+        // Pull most of the way to the centre, but stay inside the control so
+        // the mass never looks detached from the pointer on a wide button.
+        x += (r.left + r.width / 2 - x) * 0.45;
+        y += (r.top + r.height / 2 - y) * 0.7;
+      }
+
+      tx = x;
+      ty = y;
+      pointerSeen = true;
+      lastMove = now;
+
+      // Drop samples that are too close together, or a slow drag fills the
+      // trail with points spanning almost no distance.
+      const head = trail[0];
+      if (!head || (x - head.x) ** 2 + (y - head.y) ** 2 > 4) {
+        trail.unshift({ x, y, t: now });
+        if (trail.length > 140) trail.length = 140;
+      }
     };
 
     /* ── loop ───────────────────────────────────────────────────────────── */
-    const STEP = 1 / 120; // fixed physics step, so 60Hz and 144Hz agree
-    let acc = 0;
     let prev = performance.now();
     const t0 = prev;
     let raf = 0;
@@ -472,84 +504,79 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
         ty = idleAnchor.y + 34 * Math.sin(t * 0.52 + 0.8);
       }
 
-      // Fully retracted: park the whole chain on the pointer so that when it
-      // next moves the mass grows out of the cursor, rather than streaking
-      // across from wherever it was last seen.
-      if (idleMix > 0.99) {
-        for (let i = 0; i < N; i++) {
-          px[i] = tx;
-          py[i] = ty;
-          vx[i] = 0;
-          vy[i] = 0;
-        }
+      /* Age the trail out from the tail. This is the whole retraction: stop
+         moving and the ribbon shortens into the head and goes, without any
+         separate "put it away" animation. */
+      const cutoff = now - TRAIL_MS;
+      while (trail.length && trail[trail.length - 1].t < cutoff) trail.pop();
+      if (trail.length === 0 || idleMix > 0.995) {
+        trail.length = 0;
+        trail.push({ x: tx, y: ty, t: now });
+      } else {
+        // Keep the head glued to the pointer between events.
+        trail[0].x = tx;
+        trail[0].y = ty;
       }
 
-      acc += dt;
-      let guard = 0;
-      while (acc >= STEP && guard++ < 12) {
-        acc -= STEP;
+      /* Resample the path at even arc-length steps, so the metaballs sit on
+         the route the pointer actually took — corners included — rather than
+         on a line that cuts across them. */
+      let total = 0;
+      for (let i = 1; i < trail.length; i++) {
+        total += Math.hypot(trail[i].x - trail[i - 1].x, trail[i].y - trail[i - 1].y);
+      }
+      const span = Math.min(total, MAX_LEN * scale);
+      const stepLen = span / (N - 1);
 
-        // Head is the pointer. Anything less and the mass reads as sliding
-        // after the cursor rather than being held by it.
-        const hvx = tx - px[0];
-        const hvy = ty - py[0];
-        vx[0] = hvx;
-        vy[0] = hvy;
-        px[0] = tx;
-        py[0] = ty;
-
-        for (let i = 1; i < N; i++) {
-          const k = CHAIN[i].k;
-          vx[i] = (vx[i] + (px[i - 1] - px[i]) * k) * CHAIN[i].d;
-          vy[i] = (vy[i] + (py[i - 1] - py[i]) * k) * CHAIN[i].d;
-          px[i] += vx[i];
-          py[i] += vy[i];
-
-          // Limit on how far this node may fall behind, so the field always
-          // has enough overlap to stay one body. Corrected most of the way
-          // rather than snapped exactly: applied every substep it converges in
-          // two or three, and the give is what keeps the chain from feeling
-          // like a rigid string of beads.
-          const lim = LINK_MAX[i - 1] * scale;
-          const dx = px[i] - px[i - 1];
-          const dy = py[i] - py[i - 1];
-          const d2 = dx * dx + dy * dy;
-          if (d2 > lim * lim) {
-            const dist = Math.sqrt(d2);
-            const pull = (dist - lim) * 0.74;
-            px[i] -= (dx / dist) * pull;
-            py[i] -= (dy / dist) * pull;
+      px[0] = trail[0].x;
+      py[0] = trail[0].y;
+      let seg = 1;
+      let walked = 0; // distance covered up to trail[seg - 1]
+      let want = stepLen;
+      for (let i = 1; i < N; i++, want += stepLen) {
+        while (seg < trail.length) {
+          const a = trail[seg - 1];
+          const b = trail[seg];
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          if (walked + len >= want || seg === trail.length - 1) {
+            const f = len > 0 ? Math.min(1, (want - walked) / len) : 0;
+            px[i] = a.x + (b.x - a.x) * f;
+            py[i] = a.y + (b.y - a.y) * f;
+            break;
           }
-          // Record the link's extension for the volume term below.
-          link[i] = Math.min(1, Math.sqrt(d2) / lim);
+          walked += len;
+          seg++;
+        }
+        if (seg >= trail.length) {
+          px[i] = trail[trail.length - 1].x;
+          py[i] = trail[trail.length - 1].y;
         }
       }
+
+      /* Smooth the resampled line. The raw pointer stream is jittery at small
+         scales and the ribbon shows every bit of it. */
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 1; i < N - 1; i++) {
+          px[i] = px[i] * 0.5 + (px[i - 1] + px[i + 1]) * 0.25;
+          py[i] = py[i] * 0.5 + (py[i - 1] + py[i + 1]) * 0.25;
+        }
+      }
+
+      /* A short trail means the pointer is barely moving, so the mass draws in
+         rather than sitting there as a full-size disc. */
+      const extent = Math.min(1, span / (MAX_LEN * scale * 0.42));
+      const body = 0.55 + 0.45 * extent;
 
       for (let i = 0; i < N; i++) {
-        const sp = Math.hypot(vx[i], vy[i]);
-        if (sp > 0.08) {
-          dirData[i * 2] = vx[i] / sp;
-          dirData[i * 2 + 1] = vy[i] / sp;
-        }
-        const o = i * 4;
+        const o = i * 3;
         blobData[o] = px[i];
         blobData[o + 1] = py[i];
-
-        // Volume: a stretched link thins the body it is pulling, a slack one
-        // lets it swell back. Without this the mass changes shape but never
-        // changes substance, which is most of what made it read as a solid
-        // being dragged rather than as liquid.
-        const thin = 1 - 0.15 * link[i];
-        // And a slow travelling wobble around the surface, so the boundary is
-        // never perfectly circular. Phase runs down the chain, so it reads as
-        // one ripple passing through the body rather than each blob pulsing.
-        const wob = 1 + 0.05 * Math.sin(t * 2.3 - i * 0.75);
-
-        // Retracts to nothing when the cursor stops, and withdraws to nothing
-        // over a surface someone is trying to read or type into.
+        // A slow ripple travels the length of the ribbon, so its edge is never
+        // a run of perfect circles.
+        const wob = 1 + 0.055 * Math.sin(t * 2.6 - i * 0.7);
         blobData[o + 2] =
-          CHAIN[i].r * scale * thin * wob * (1 - idleMix) * (1 - quietMix);
-        blobData[o + 3] = 1 + Math.min(MAX_STRETCH - 1, sp * 0.042);
+          R_HEAD * scale * profile(i / (N - 1)) * body * wob *
+          (1 - idleMix) * (1 - quietMix);
       }
 
       // Fit and centre the canvas on the mass.
@@ -560,9 +587,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
         if (px[i] > x1) x1 = px[i];
         if (py[i] < y0) y0 = py[i];
         if (py[i] > y1) y1 = py[i];
-        // How far this frame's field can actually reach: the coincident-mass
-        // radius built from the radii and stretches in play right now.
-        const e = blobData[i * 4 + 2] * blobData[i * 4 + 3];
+        const e = blobData[i * 3 + 2];
         reachSq += e * e;
       }
       fitBox(Math.max(x1 - x0, y1 - y0) + 2 * Math.sqrt(reachSq) + 16);
@@ -622,8 +647,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
         gl.uniform1f(uHasBand, 0);
       }
 
-      gl.uniform4fv(uBlob, blobData);
-      gl.uniform2fv(uDir, dirData);
+      gl.uniform3fv(uBlob, blobData);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     };
 

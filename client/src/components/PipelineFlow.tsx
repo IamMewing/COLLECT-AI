@@ -40,11 +40,27 @@ const EDGES: [string, string][] = [
   ['draft', 'reflect'],
 ];
 
-const ACID = '#FFE500';
-const MINT = '#00B85F';
-const BLOOD = '#FF2D1F';
-const DIM = 'rgba(255,229,0,0.34)';
-const MUTED = 'rgba(255,229,0,0.5)';
+const TONIC = '#D9FB5F';
+const PINK = '#FF7BB5';
+const DIM = 'rgba(217,251,95,0.32)';
+const MUTED = 'rgba(217,251,95,0.5)';
+
+/**
+ * An orb's colour says what the STEP is doing, never what it found.
+ *
+ * This used to tint each orb by the severity of its own reading — a critical
+ * risk score painted the orb red — so a step that ran perfectly and reported
+ * bad news looked like a step that had failed. On a graph of a process, red
+ * and green mean broken and working; they cannot also mean expensive and
+ * cheap. The findings carry their own severity in the readout text, which is
+ * where a number being alarming belongs.
+ */
+const stateColor = (status: NodeStatus): string => {
+  if (status === 'error') return PINK;
+  if (status === 'idle') return DIM;
+  if (status === 'skipped') return MUTED;
+  return TONIC; // working and settled are both the live colour
+};
 
 const node = (id: string) => NODES.find((n) => n.id === id)!;
 
@@ -102,23 +118,18 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
     return { risk: 'done', probability: 'done', plan: 'done', draft: draftStatus, reflect: reflectStatus };
   }, [sweepResult, approveResult, isSweeping, isApproving, error]);
 
-  const colorFor = (status: NodeStatus, nodeId: string): string => {
-    if (status === 'error') return BLOOD;
-    if (status === 'active') return ACID;
-    if (status === 'skipped') return MUTED;
-    if (status === 'done' && sweepResult) {
-      if (nodeId === 'risk') {
-        if (sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High') return BLOOD;
-        return MINT;
-      }
-      if (nodeId === 'probability') return sweepResult.probability.probability < 50 ? BLOOD : MINT;
-      if (nodeId === 'plan') {
-        return sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High' ? BLOOD : MINT;
-      }
-      if (nodeId === 'draft' && sweepResult.plan.tone === 'urgent') return BLOOD;
-      return MINT;
-    }
-    return DIM;
+  const colorFor = (status: NodeStatus) => stateColor(status);
+
+  /** Severity of a reading lives in the readout text, where "this number is
+   *  alarming" is the right thing to say — and never on the orb, where it
+   *  would read as "this step went wrong". */
+  const alarming = (id: string): boolean => {
+    if (!sweepResult) return false;
+    const hot = sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High';
+    if (id === 'risk') return hot;
+    if (id === 'probability') return sweepResult.probability.probability < 50;
+    if (id === 'draft') return sweepResult.plan.tone === 'urgent';
+    return false;
   };
 
   /** Each node reports its own finding once it has one. */
@@ -165,13 +176,13 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
 
   if (error) {
     return (
-      <div className="slab" style={{ borderColor: BLOOD, color: BLOOD }}>
+      <div className="slab" style={{ borderColor: PINK, color: PINK }}>
         <h3 className="title" style={{ marginBottom: 10 }}>The agent didn’t answer</h3>
-        <p className="body" style={{ color: ACID, opacity: 0.8, marginBottom: 20 }}>
+        <p className="body" style={{ color: TONIC, opacity: 0.8, marginBottom: 20 }}>
           {error.details || error.error || 'The reasoning engine timed out. Free-tier rate limits do this.'}
         </p>
         {onRetry && (
-          <button className="pill" onClick={onRetry} style={{ ['--pill-fg' as string]: BLOOD, ['--pill-inv' as string]: '#fff' }}>
+          <button className="pill" onClick={onRetry} style={{ ['--pill-fg' as string]: PINK, ['--pill-inv' as string]: '#000' }}>
             <RefreshCw size={14} /> Try again
           </button>
         )}
@@ -223,14 +234,14 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
         {/* A slow sweep across the panel. Nothing on screen should ever be
             completely still, least of all the part claiming to be thinking. */}
         <g className="pf-sweep">
-          <line x1="0" y1="1.5" x2="0" y2={BASE} stroke={ACID} strokeWidth="0.13" opacity="0.5" />
-          <line x1="-1.1" y1="3" x2="-1.1" y2={BASE} stroke={ACID} strokeWidth="0.09" opacity="0.22" />
-          <line x1="-2.4" y1="5" x2="-2.4" y2={BASE} stroke={ACID} strokeWidth="0.07" opacity="0.1" />
+          <line x1="0" y1="1.5" x2="0" y2={BASE} stroke={TONIC} strokeWidth="0.13" opacity="0.5" />
+          <line x1="-1.1" y1="3" x2="-1.1" y2={BASE} stroke={TONIC} strokeWidth="0.09" opacity="0.22" />
+          <line x1="-2.4" y1="5" x2="-2.4" y2={BASE} stroke={TONIC} strokeWidth="0.07" opacity="0.1" />
         </g>
 
         {EDGES.map(([from, to], i) => {
           const state = edgeState(from, to);
-          const stroke = state === 'live' ? ACID : state === 'done' ? MINT : state === 'skipped' ? MUTED : DIM;
+          const stroke = state === 'live' || state === 'done' ? TONIC : state === 'skipped' ? MUTED : DIM;
           const flowing = state === 'live' || state === 'done';
           return (
             <g key={`${from}-${to}`}>
@@ -263,50 +274,38 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
 
         {NODES.map((n, i) => {
           const status = statuses[n.id];
-          const color = colorFor(status, n.id);
+          const color = colorFor(status);
           const active = status === 'active';
           const done = status === 'done';
           return (
             <g key={n.id} transform={`translate(${n.x}, ${n.y})`}>
-              <g className="pf-node" style={{ ['--i' as string]: i }}>
-                {/* Gauge collar: a dashed ring reads as graduations, and it
-                    turns, slowly when waiting and hard while working. */}
-                <circle
-                  className={`pf-collar${active ? ' pf-collar--spin' : ''}`}
-                  r="2.45"
-                  fill="none"
-                  stroke={color}
-                  strokeWidth="0.16"
-                  strokeDasharray="0.26 0.74"
-                  opacity={status === 'idle' ? 0.5 : 0.85}
-                />
-                {active && <circle r="1.9" fill="none" stroke={color} strokeWidth="0.26" className="pf-ring" />}
-                {active && <circle r="1.9" fill="none" stroke={color} strokeWidth="0.26" className="pf-ring pf-ring--2" />}
-                {/* A settled node closes a solid arc over the collar — the
-                    gauge reading that this step is locked in. */}
+              <g
+                className={`pf-orb pf-orb--${status}`}
+                style={{ ['--i' as string]: i, color }}
+              >
+                {/* An orb, not a dot: two shells counter-rotating around a
+                    core. Waiting, they barely turn and the core is hollow.
+                    Thinking, they spin up, the core fills and pulses out.
+                    Settled, one shell closes into a solid ring. */}
+                <circle className="pf-shell pf-shell--a" r="2.9" pathLength="1" />
+                <circle className="pf-shell pf-shell--b" r="2.3" pathLength="1" />
+
+                {active && <circle className="pf-pulse" r="2.0" pathLength="1" />}
+                {active && <circle className="pf-pulse pf-pulse--2" r="2.0" pathLength="1" />}
+
                 {(done || status === 'skipped') && (
-                  <circle
-                    className="pf-lock"
-                    r="2.45"
-                    fill="none"
-                    stroke={color}
-                    strokeWidth="0.3"
-                    pathLength="1"
-                    strokeDasharray="1"
-                    opacity={status === 'skipped' ? 0.45 : 1}
-                  />
+                  <circle className="pf-seal" r="2.9" pathLength="1" />
                 )}
-                <circle
-                  className={done ? 'pf-dot pf-dot--breathe' : 'pf-dot'}
-                  r="1.3"
-                  fill={status === 'idle' ? 'none' : color}
-                  stroke={color}
-                  strokeWidth="0.38"
-                />
+
+                <circle className="pf-core" r="1.25" />
+                {/* A bright inner bead that drifts while the orb is thinking,
+                    so the core isn't a dead disc. */}
+                {active && <circle className="pf-spark" r="0.42" cx="0" cy="-0.55" />}
+
                 <text
                   className="pf-index"
                   x="0"
-                  y="-3.5"
+                  y="-4.0"
                   fill={color}
                   opacity={status === 'idle' ? 0.55 : 0.9}
                 >
@@ -321,7 +320,7 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
       <div className="readouts pf-readouts" style={{ marginTop: 'clamp(20px, 3vw, 34px)' }}>
         {NODES.map((n, i) => {
           const status = statuses[n.id];
-          const color = colorFor(status, n.id);
+          const color = colorFor(status);
           return (
             <div className="readout pf-readout" key={n.id} style={{ ['--i' as string]: i }}>
               <dt style={{ opacity: 1, color: status === 'idle' ? MUTED : color }}>
@@ -335,7 +334,11 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
                   letterSpacing: '-0.015em',
                   fontSize: 'clamp(0.85rem, 1.15vw, 1.02rem)',
                   lineHeight: 1.28,
-                  color: status === 'idle' ? MUTED : color,
+                  color:
+                    status === 'idle' ? MUTED
+                    : status === 'error' ? PINK
+                    : alarming(n.id) && status === 'done' ? PINK
+                    : color,
                 }}
               >
                 {readingFor(n.id, status)}

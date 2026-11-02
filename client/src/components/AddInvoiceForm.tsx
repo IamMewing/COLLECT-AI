@@ -98,7 +98,7 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
           </div>
 
           {formError && (
-            <p className="mono" style={{ color: 'var(--blood)', fontSize: '0.8rem' }}>{formError}</p>
+            <p className="mono" style={{ color: 'var(--warn)', fontSize: '0.8rem' }}>{formError}</p>
           )}
 
           <button type="submit" className="pill pill--lg pill--solid" disabled={submitting} style={{ marginTop: 4 }}>

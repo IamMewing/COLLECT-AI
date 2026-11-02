@@ -14,7 +14,7 @@ import { AddInvoiceForm } from './components/AddInvoiceForm';
 import { useInView } from './useInView';
 import { X } from 'lucide-react';
 
-type Tone = 'acid' | 'ink' | 'bone';
+type Tone = 'acid' | 'ink' | 'pink';
 
 /** A full-bleed colour field that reveals its contents once, on first sight. */
 const Field: React.FC<{
@@ -247,10 +247,10 @@ export const App: React.FC = () => {
           </div>
         </Field>
 
-        <Torn from="acid" to="bone" variant={2} />
+        <Torn from="acid" to="pink" variant={2} />
         <Field
           id="decision"
-          tone="bone"
+          tone="pink"
           marker="Your call"
           statement="Nothing goes out until you say so"
         >
@@ -264,7 +264,7 @@ export const App: React.FC = () => {
           />
         </Field>
 
-        <Torn from="bone" to="ink" variant={0} />
+        <Torn from="pink" to="ink" variant={0} />
         <footer className="field field--ink field--tight" data-field="ink">
           <div className="wrap">
             <h2 className="mega" style={{ marginBottom: 'clamp(28px, 4vw, 56px)' }}>Get paid.</h2>
@@ -293,7 +293,7 @@ export const App: React.FC = () => {
           style={{
             position: 'fixed', left: 'var(--gutter)', bottom: 'var(--gutter)', zIndex: 200,
             maxWidth: 'min(460px, calc(100vw - var(--gutter) * 2))',
-            background: 'var(--blood)', color: '#fff',
+            background: 'var(--pink)', color: 'var(--ink)',
             border: '2px solid #fff', padding: '18px 20px',
           }}
         >

@@ -112,13 +112,13 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
         </div>
         <div className="readout">
           <dt>Days late</dt>
-          <dd style={late ? { color: 'var(--blood)' } : undefined}>
+          <dd style={late ? { color: 'var(--warn)' } : undefined}>
             {inv.days_overdue}<small>d</small>
           </dd>
         </div>
         <div className="readout">
           <dt>Reminders ignored</dt>
-          <dd style={inv.ignored_reminders >= 2 ? { color: 'var(--blood)' } : undefined}>
+          <dd style={inv.ignored_reminders >= 2 ? { color: 'var(--warn)' } : undefined}>
             {inv.ignored_reminders}
           </dd>
         </div>

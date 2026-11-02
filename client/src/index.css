@@ -1,27 +1,36 @@
 /* ==========================================================================
    CollectAI — design system
-   Three flat fields (acid / ink / bone). Enormous grotesque type. One bold
-   move: liquid blobs that knock the type out beneath them. Nothing soft.
+   Three flat fields (tonic / ink / pink). Enormous grotesque type. One bold
+   move: an ink trail that knocks the type out beneath it. Nothing soft.
    ========================================================================== */
 
 :root {
-  /* Surfaces — the yellow is a FIELD, not an accent. */
-  --acid:  #FFE500;
-  --acid-deep: #E8D000;
+  /* Two colours and black. Both are FIELDS, not accents — the page is built
+     out of them rather than decorated with them. */
+  --tonic: #D9FB5F;
+  --tonic-deep: #C4E84A;
+  --pink:  #FF7BB5;
+  --pink-deep: #F2609F;
   --ink:   #000000;
-  --bone:  #F2EFE4;
+  --bone:  #F7F4EC;   /* neutral, for small surfaces only */
 
-  /* The only other hues in the system. Both mean money. */
-  --blood: #FF2D1F;   /* at risk / overdue */
-  --mint:  #00B85F;   /* settled / paid */
+  /* Kept as aliases so nothing references a colour that no longer exists. */
+  --acid: var(--tonic);
+  --acid-deep: var(--tonic-deep);
+
+  /* State is field-aware: on a light field hue can't carry it (pink on tonic
+     is unreadable), so weight and shape do, and the colour stays ink. On the
+     ink field the two brand colours take over. Overridden per .field below. */
+  --warn: var(--ink);   /* at risk / overdue / needs attention */
+  --ok:   var(--ink);   /* settled / paid / fine */
 
   --ink-60: rgba(0,0,0,0.6);
   --ink-45: rgba(0,0,0,0.45);
   --ink-18: rgba(0,0,0,0.18);
   --ink-08: rgba(0,0,0,0.08);
-  --acid-60: rgba(255,229,0,0.6);
-  --acid-45: rgba(255,229,0,0.45);
-  --acid-18: rgba(255,229,0,0.18);
+  --acid-60: rgba(217,251,95,0.6);
+  --acid-45: rgba(217,251,95,0.45);
+  --acid-18: rgba(217,251,95,0.18);
 
   --display: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   --data: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
@@ -63,7 +72,7 @@ body { overflow-x: hidden; }
 ::-webkit-scrollbar-thumb:hover { background: #fff; }
 
 :focus-visible {
-  outline: 3px solid var(--blood);
+  outline: 3px solid var(--warn);
   outline-offset: 3px;
 }
 
@@ -75,9 +84,11 @@ body { overflow-x: hidden; }
   width: 100%;
   padding: clamp(56px, 9vw, 130px) var(--gutter);
 }
-.field--acid { background: var(--acid); color: var(--ink); }
-.field--ink  { background: var(--ink);  color: var(--acid); }
-.field--bone { background: var(--bone); color: var(--ink); }
+.field--acid { background: var(--tonic); color: var(--ink); }
+.field--ink  { background: var(--ink);  color: var(--tonic); }
+/* On the ink field the two brand colours can carry state directly. */
+.field--ink  { --warn: var(--pink); --ok: var(--tonic); }
+.field--pink { background: var(--pink); color: var(--ink); }
 
 .field--flush { padding-top: 0; }
 .field--tight { padding-block: clamp(40px, 6vw, 80px); }
@@ -216,16 +227,16 @@ body { overflow-x: hidden; }
 
 /* field-aware variants */
 .field--ink .pill,  .pill--on-ink  { --pill-fg: var(--acid); --pill-inv: var(--ink); }
-.field--acid .pill, .pill--on-acid { --pill-fg: var(--ink);  --pill-inv: var(--acid); }
-.field--bone .pill, .pill--on-bone { --pill-fg: var(--ink);  --pill-inv: var(--bone); }
+.field--acid .pill, .pill--on-acid { --pill-fg: var(--ink);  --pill-inv: var(--tonic); }
+.field--pink .pill, .pill--on-pink { --pill-fg: var(--ink);  --pill-inv: var(--pink); }
 
 /* solid, high-priority action */
 .pill--solid { background: var(--pill-fg); color: var(--pill-inv, var(--acid)); }
 .pill--solid::before { background: var(--pill-inv, var(--acid)); }
 .pill--solid:hover { color: var(--pill-fg); }
 
-.pill--go     { --pill-fg: var(--mint);  --pill-inv: #fff; }
-.pill--stop   { --pill-fg: var(--blood); --pill-inv: #fff; }
+.pill--go     { --pill-fg: var(--ok);    --pill-inv: var(--tonic); }
+.pill--stop   { --pill-fg: var(--warn);  --pill-inv: var(--pink); }
 .pill--lg     { padding: 17px 36px; font-size: 0.95rem; }
 .pill--sm     { padding: 9px 17px;  font-size: 0.72rem; }
 .pill--icon   { padding: 11px; border-radius: 999px; }
@@ -249,8 +260,16 @@ body { overflow-x: hidden; }
 }
 .tag--solid  { background: currentColor; }
 .tag--solid > * { color: var(--acid); }
-.tag--risk   { color: var(--blood); }
-.tag--paid   { color: var(--mint); }
+/* State reads as a filled chip, not as coloured text — pink on tonic is
+   unreadable as type, and red/green were never in this palette. */
+.tag--risk   { background: var(--pink);  color: var(--ink); border-color: var(--ink); }
+.tag--paid   { background: var(--ink);   color: var(--tonic); border-color: var(--ink); }
+.field--ink .tag--risk { background: var(--pink);  color: var(--ink); border-color: var(--pink); }
+.field--ink .tag--paid { background: var(--tonic); color: var(--ink); border-color: var(--tonic); }
+/* On the pink field a pink chip is invisible, so the fill inverts and the two
+   states separate by their type colour instead. */
+.field--pink .tag--risk { background: var(--ink); color: var(--pink);  border-color: var(--ink); }
+.field--pink .tag--paid { background: var(--ink); color: var(--tonic); border-color: var(--ink); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; position: relative; }
 /* The pulse is a scaling pseudo-element rather than a spreading box-shadow,
@@ -279,6 +298,7 @@ body { overflow-x: hidden; }
 .slab--fill-ink  { background: var(--ink);  color: var(--acid); }
 .slab--fill-acid { background: var(--acid); color: var(--ink); }
 .slab--fill-bone { background: var(--bone); color: var(--ink); }
+
 
 .rule { height: 2px; background: currentColor; border: 0; opacity: 1; }
 .rule--hair { height: 2px; opacity: 0.18; }
@@ -382,7 +402,7 @@ body { overflow-x: hidden; }
   transition: color 0.45s var(--out), background 0.45s var(--out);
 }
 .nav[data-on='ink']  { color: var(--acid); background: var(--ink); }
-.nav[data-on='bone'] { color: var(--ink);  background: var(--bone); }
+.nav[data-on='pink'] { color: var(--ink);  background: var(--pink); }
 
 .brand {
   display: inline-flex;
@@ -561,8 +581,16 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   to   { stroke-dasharray: 1; stroke-dashoffset: 0; }
 }
 
-.pf-node { transform-box: fill-box; transform-origin: center; }
-.pf--in .pf-node {
+/* ──────────────────────────────────────────────────────────────────────────
+   THINKING ORBS
+   Each step is an orb: a core inside two counter-rotating shells. Waiting,
+   the shells barely turn and the core is hollow. Thinking, they spin up, the
+   core fills and pulses outward. Settled, one shell closes into a solid ring.
+   State is carried by motion and fill — never by hue, which belongs to the
+   brand and to the severity of the readings, not to whether a step worked.
+   ────────────────────────────────────────────────────────────────────────── */
+.pf-orb { transform-box: fill-box; transform-origin: center; color: currentColor; }
+.pf--in .pf-orb {
   animation: pf-land 0.66s cubic-bezier(0.17, 1.12, 0.32, 1) backwards;
   animation-delay: calc(0.22s + var(--i) * 0.095s);
 }
@@ -571,46 +599,86 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   to   { transform: scale(1); opacity: 1; }
 }
 
-.pf-dot { transition: fill 0.5s var(--out), stroke 0.5s var(--out); }
-/* A settled node keeps a slow pulse so the graph never looks switched off. */
-.pf-dot--breathe {
+.pf-shell {
+  fill: none;
+  stroke: currentColor;
   transform-box: fill-box;
   transform-origin: center;
-  animation: pf-breathe 3.6s ease-in-out infinite;
 }
-@keyframes pf-breathe {
-  0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.14); }
+/* Broken into arcs so the rotation is visible at all. */
+.pf-shell--a {
+  stroke-width: 0.14;
+  stroke-dasharray: 0.085 0.055;
+  opacity: 0.55;
+  animation: pf-spin 26s linear infinite;
 }
-
-/* Graduated collar around each node. It turns slowly while the step is
-   waiting and hard while it is working, so the panel reads as instrumented
-   rather than drawn. */
-.pf-collar {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: pf-spin 34s linear infinite;
+.pf-shell--b {
+  stroke-width: 0.2;
+  stroke-dasharray: 0.3 0.7;
+  opacity: 0.75;
+  animation: pf-spin 18s linear infinite reverse;
 }
-.pf-collar--spin { animation-duration: 2.6s; }
+.pf-orb--active .pf-shell--a { animation-duration: 3.4s; opacity: 0.9; }
+.pf-orb--active .pf-shell--b { animation-duration: 2.1s; opacity: 1; }
+.pf-orb--idle .pf-shell--a { opacity: 0.4; }
+.pf-orb--idle .pf-shell--b { opacity: 0.5; }
 @keyframes pf-spin { to { transform: rotate(360deg); } }
 
-/* The arc that closes over the collar once a step is settled. */
-.pf-lock {
+/* Thinking: rings leaving the core. */
+.pf-pulse {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.22;
   transform-box: fill-box;
   transform-origin: center;
-  animation: pf-lock 0.7s var(--out) backwards;
+  animation: pf-pulse 1.8s ease-out infinite;
 }
-@keyframes pf-lock {
+.pf-pulse--2 { animation-delay: 0.9s; }
+@keyframes pf-pulse {
+  0%   { transform: scale(0.55); opacity: 0.85; }
+  100% { transform: scale(1.7);  opacity: 0; }
+}
+
+/* Settled: the outer shell closes. */
+.pf-seal {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.26;
+  stroke-dasharray: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pf-seal 0.75s var(--out) backwards;
+}
+.pf-orb--skipped .pf-seal { opacity: 0.4; stroke-dasharray: 0.03 0.04; }
+@keyframes pf-seal {
   from { stroke-dashoffset: 1; transform: rotate(-90deg); }
   to   { stroke-dashoffset: 0; transform: rotate(-90deg); }
 }
 
-/* Idle edges march rather than sit, so an untouched graph still looks live. */
-.pf-edge--march { animation: pf-march 2.4s linear infinite; }
-@keyframes pf-march {
-  from { stroke-dasharray: 0.016 0.024; stroke-dashoffset: 0.08; }
-  to   { stroke-dasharray: 0.016 0.024; stroke-dashoffset: 0; }
+.pf-core {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 0.3;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: fill 0.45s var(--out);
 }
+.pf-orb--idle .pf-core { fill: transparent; }
+.pf-orb--done .pf-core { animation: pf-breathe 3.6s ease-in-out infinite; }
+.pf-orb--active .pf-core { animation: pf-breathe 1.5s ease-in-out infinite; }
+@keyframes pf-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.12); }
+}
+
+/* A bead circling inside the core while it thinks. */
+.pf-spark {
+  fill: var(--ink);
+  transform-box: fill-box;
+  transform-origin: 0.21px 0.76px;   /* the core's centre, in viewBox units */
+  animation: pf-spark 1.25s linear infinite;
+}
+@keyframes pf-spark { to { transform: rotate(360deg); } }
 
 .pf-index {
   font-family: var(--data);
@@ -625,13 +693,6 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
 @keyframes pf-sweep {
   from { transform: translateX(-4px); }    /* viewBox units */
   to   { transform: translateX(106px); }
-}
-
-.pf-ring { transform-origin: center; animation: pf-ring 1.6s ease-out infinite; }
-.pf-ring--2 { animation-delay: 0.8s; }
-@keyframes pf-ring {
-  0%   { r: 1.4; opacity: 0.9; }
-  100% { r: 3.6; opacity: 0; }
 }
 
 .pf--in .pf-readout {

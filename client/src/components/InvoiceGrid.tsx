@@ -18,13 +18,13 @@ ModuleRegistry.registerModules([AllCommunityModule]);
    onto it: acid background, black rules, inverted black header. */
 const gridTheme = themeQuartz.withParams({
   accentColor: '#000000',
-  backgroundColor: '#FFE500',
-  dataBackgroundColor: '#FFE500',
+  backgroundColor: '#D9FB5F',
+  dataBackgroundColor: '#D9FB5F',
   foregroundColor: '#000000',
   textColor: '#000000',
   borderColor: 'rgba(0,0,0,0.20)',
   headerBackgroundColor: '#000000',
-  headerTextColor: '#FFE500',
+  headerTextColor: '#D9FB5F',
   rowHoverColor: 'rgba(0,0,0,0.07)',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
   borderRadius: 0,
@@ -78,10 +78,12 @@ export const InvoiceGrid: React.FC<InvoiceGridProps> = ({
         headerName: 'Days late',
         type: 'numericColumn',
         width: 128,
-        cellStyle: (p) => ({
-          color: (p.value ?? 0) > 30 ? '#FF2D1F' : 'inherit',
-          fontWeight: (p.value ?? 0) > 30 ? 700 : 400,
-        }),
+        // Badly overdue is called out with a fill, not a hue: there is no
+        // red in this palette, and pink as type on tonic is unreadable.
+        cellStyle: (p) =>
+          (p.value ?? 0) > 30
+            ? { background: '#FF7BB5', color: '#000000', fontWeight: 800 }
+            : { background: 'transparent', color: 'inherit', fontWeight: 400 },
       },
       { field: 'ignored_reminders', headerName: 'Ignored', type: 'numericColumn', width: 112 },
       {

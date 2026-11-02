@@ -88,20 +88,18 @@ body { overflow-x: hidden; }
 /* ==========================================================================
    TORN DIVIDERS — organic boundary between fields
    ========================================================================== */
+/* The edge is generated per-frame in Torn.tsx, so the element just needs to
+   be the right size — no overhang to hide straight ends any more. */
 .torn {
   display: block;
-  width: 118%;
-  height: clamp(42px, 6vw, 96px);
-  margin-left: -9%;
+  width: 100%;
+  height: clamp(54px, 7vw, 112px);
   position: relative;
   z-index: 3;
+  margin-top: -1px;    /* kill the seam a fractional layout height can leave */
+  margin-bottom: -1px;
 }
 .torn svg { display: block; width: 100%; height: 100%; }
-.torn--drift svg { animation: torn-drift 24s var(--inout) infinite alternate; }
-@keyframes torn-drift {
-  from { transform: translateX(-2.5%); }
-  to   { transform: translateX(2.5%); }
-}
 
 /* ==========================================================================
    TYPE
@@ -322,14 +320,13 @@ body { overflow-x: hidden; }
    the type beneath it out to yellow. Same layer inverts over the ink field.
    ========================================================================== */
 .blobs {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 2;
+  z-index: 50;              /* over every field, under the nav (60) */
   pointer-events: none;
   mix-blend-mode: difference;
-  filter: url(#goo);
+  display: block;
 }
-.blobs circle { fill: var(--acid); }
 
 /* ==========================================================================
    BOOT — one orchestrated load moment, then it's gone
@@ -540,11 +537,59 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   100% { transform: scale(1) rotate(0); }
 }
 
-/* Agent graph — the ring that marks a node currently working. */
-.pf-ring { transform-origin: center; animation: pf-ring 1.5s ease-out infinite; }
+/* ==========================================================================
+   AGENT GRAPH
+   The edges draw themselves on first sight, the nodes land in reading order
+   behind them, and beads keep moving along any edge that has carried work.
+   Everything keys off .pf--in, which is latched on once and never removed, so
+   a sweep changing the colours underneath can't replay the entrance.
+   ========================================================================== */
+.pf-edge { fill: none; transition: stroke 0.5s var(--out), stroke-width 0.5s var(--out); }
+.pf--in .pf-edge {
+  animation: pf-draw 0.9s var(--out) backwards;
+  animation-delay: calc(var(--i) * 0.13s);
+}
+@keyframes pf-draw {
+  from { stroke-dasharray: 1; stroke-dashoffset: 1; }
+  to   { stroke-dasharray: 1; stroke-dashoffset: 0; }
+}
+
+.pf-node { transform-box: fill-box; transform-origin: center; }
+.pf--in .pf-node {
+  animation: pf-land 0.66s cubic-bezier(0.17, 1.12, 0.32, 1) backwards;
+  animation-delay: calc(0.22s + var(--i) * 0.095s);
+}
+@keyframes pf-land {
+  from { transform: scale(0); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+.pf-dot { transition: fill 0.5s var(--out), stroke 0.5s var(--out); }
+/* A settled node keeps a slow pulse so the graph never looks switched off. */
+.pf-dot--breathe {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pf-breathe 3.6s ease-in-out infinite;
+}
+@keyframes pf-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.14); }
+}
+
+.pf-ring { transform-origin: center; animation: pf-ring 1.6s ease-out infinite; }
+.pf-ring--2 { animation-delay: 0.8s; }
 @keyframes pf-ring {
-  0%   { r: 1.5; opacity: 0.95; }
-  100% { r: 3.4; opacity: 0; }
+  0%   { r: 1.4; opacity: 0.9; }
+  100% { r: 3.6; opacity: 0; }
+}
+
+.pf--in .pf-readout {
+  animation: pf-up 0.62s var(--out) backwards;
+  animation-delay: calc(0.46s + var(--i) * 0.075s);
+}
+@keyframes pf-up {
+  from { opacity: 0; transform: translateY(15px); }
+  to   { opacity: 1; transform: none; }
 }
 
 /* ==========================================================================

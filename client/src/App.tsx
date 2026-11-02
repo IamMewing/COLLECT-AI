@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError } from './types';
 import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, checkPaypalStatus } from './api';
 import { Boot } from './components/Boot';
-import { GooFilter } from './components/LiquidBlobs';
+import { LiquidBlobs } from './components/LiquidBlobs';
 import { Nav } from './components/Nav';
 import { Hero } from './components/Hero';
 import { Torn } from './components/Torn';
@@ -192,7 +192,7 @@ export const App: React.FC = () => {
   return (
     <>
       <Boot />
-      <GooFilter />
+      <LiquidBlobs />
       <Nav />
 
       <main>

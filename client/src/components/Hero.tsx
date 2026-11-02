@@ -1,5 +1,4 @@
 import React from 'react';
-import { LiquidBlobs } from './LiquidBlobs';
 
 const RUNS = [
   'Risk scored in parallel',
@@ -15,8 +14,6 @@ const go = (id: string) => (e: React.MouseEvent) => {
 
 export const Hero: React.FC = () => (
   <section className="field field--acid hero" data-field="acid" id="top">
-    <LiquidBlobs />
-
     <div className="wrap hero-inner">
       <h1 className="mega hero-head">
         <span className="hero-line"><span>Your invoices</span></span>

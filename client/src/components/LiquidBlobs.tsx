@@ -62,6 +62,10 @@ const LINK_MAX = CHAIN.slice(0, -1).map((b, i) => 0.62 * (b.r + CHAIN[i + 1].r))
 const SPAN = LINK_MAX.reduce((a, b) => a + b, 0);
 const REACH = Math.sqrt(CHAIN.reduce((a, b) => a + b.r * b.r, 0));
 const MAX_STRETCH = 1.55;
+/** How long a still cursor keeps its mass before it starts retracting. Long
+ *  enough not to flicker on the pauses inside ordinary pointer movement,
+ *  short enough that stopping to read clears the page. */
+const IDLE_AFTER = 650;
 const BOX_AT_FULL_SCALE = Math.ceil(SPAN + 2 * REACH * MAX_STRETCH);
 
 const VERT = `
@@ -324,29 +328,37 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
         samples = slow = fast = 0;
       }
 
-      const idle = !pointerSeen || now - lastMove > 1800;
-      idleMix += ((idle ? 1 : 0) - idleMix) * Math.min(1, dt * 2.2);
+      /* The mass belongs to the cursor, so a still cursor has no mass: it
+         retracts to nothing shortly after you stop and comes back the moment
+         you move. Touch is the exception — there is no pointer there to answer
+         to, so rather than never appearing at all it drifts the hero. */
+      const idle = coarse ? false : !pointerSeen || now - lastMove > IDLE_AFTER;
+      idleMix += ((idle ? 1 : 0) - idleMix) * Math.min(1, dt * 4.4);
       quietMix += (quietTarget - quietMix) * Math.min(1, dt * 6.5);
 
-      if (idle) {
-        // Where the mass rests depends on whether it has a cursor to answer
-        // to. Once the pointer has moved it parks where it was left, which is
-        // where the eye already is. Until then — touch, or a mouse that hasn't
-        // moved yet — it belongs in the hero: anchored mid-viewport it would
-        // sit on top of the body copy of whatever section you scrolled to.
-        if (coarse || !pointerSeen) {
-          const hero = document.getElementById('top');
-          const r = hero?.getBoundingClientRect();
-          const top = r ? r.top : 0;
-          const hh = r ? r.height : h;
-          idleAnchor.x = w * (0.5 + 0.26 * Math.sin(t * 0.31));
-          idleAnchor.y = top + hh * (0.34 + 0.12 * Math.sin(t * 0.43 + 1.1));
-        }
+      if (coarse) {
+        // Penned to the hero: anchored mid-viewport it would sit on top of the
+        // body copy of whatever section you scrolled to.
+        const hero = document.getElementById('top');
+        const r = hero?.getBoundingClientRect();
+        const top = r ? r.top : 0;
+        const hh = r ? r.height : h;
+        idleAnchor.x = w * (0.5 + 0.26 * Math.sin(t * 0.31));
+        idleAnchor.y = top + hh * (0.34 + 0.12 * Math.sin(t * 0.43 + 1.1));
         tx = idleAnchor.x + 46 * Math.sin(t * 0.37);
         ty = idleAnchor.y + 34 * Math.sin(t * 0.52 + 0.8);
-      } else {
-        idleAnchor.x = tx;
-        idleAnchor.y = ty;
+      }
+
+      // Fully retracted: park the whole chain on the pointer so that when it
+      // next moves the mass grows out of the cursor, rather than streaking
+      // across from wherever it was last seen.
+      if (idleMix > 0.99) {
+        for (let i = 0; i < N; i++) {
+          px[i] = tx;
+          py[i] = ty;
+          vx[i] = 0;
+          vy[i] = 0;
+        }
       }
 
       acc += dt;
@@ -393,8 +405,9 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
         const o = i * 4;
         blobData[o] = px[i];
         blobData[o + 1] = py[i];
-        // Idle mass contracts a little so a parked blob reads as resting.
-        blobData[o + 2] = CHAIN[i].r * scale * (1 - 0.22 * idleMix) * (1 - 0.94 * quietMix);
+        // Retracts to nothing when the cursor stops, and withdraws to nothing
+        // over a surface someone is trying to read or type into.
+        blobData[o + 2] = CHAIN[i].r * scale * (1 - idleMix) * (1 - quietMix);
         blobData[o + 3] = 1 + Math.min(MAX_STRETCH - 1, sp * 0.042);
       }
 
@@ -420,7 +433,9 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       // altogether skips the blend as well as the draw — leaving a fully
       // transparent one up still costs a composite pass over its whole box.
       const nothingToDraw =
-        quietMix > 0.985 || ox > w || oy > h || ox + box < 0 || oy + box < 0;
+        quietMix > 0.985 ||
+        idleMix > 0.985 ||
+        ox > w || oy > h || ox + box < 0 || oy + box < 0;
       if (nothingToDraw) {
         if (!hidden) {
           canvas.style.display = 'none';

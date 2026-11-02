@@ -1,36 +1,33 @@
 /* ==========================================================================
    CollectAI — design system
-   Three flat fields (tonic / ink / pink). Enormous grotesque type. One bold
-   move: an ink trail that knocks the type out beneath it. Nothing soft.
+   Three flat fields (lime / ember / lilac) and nothing else — these three
+   colours are the entire palette. Enormous grotesque type. One bold move: a
+   trail of the cursor's own path, poured across the page. Nothing soft.
    ========================================================================== */
 
 :root {
-  /* Two colours and black. Both are FIELDS, not accents — the page is built
-     out of them rather than decorated with them. */
-  --tonic: #D9FB5F;
-  --tonic-deep: #C4E84A;
-  --pink:  #FF7BB5;
-  --pink-deep: #F2609F;
-  --ink:   #000000;
-  --bone:  #F7F4EC;   /* neutral, for small surfaces only */
+  /* The whole palette. Three colours, nothing else — no black, no white, no
+     greys. Every surface, rule and glyph on the page is one of these. */
+  --lilac: #CBB3E8;
+  --lime:  #D4FF3F;
+  --ember: #E34234;
 
-  /* Kept as aliases so nothing references a colour that no longer exists. */
-  --acid: var(--tonic);
-  --acid-deep: var(--tonic-deep);
+  /* Ember is the only dark one (luminance .21 against lime's .86), so it does
+     the job black used to: type on the light fields, and the dark field
+     itself. Lime on ember and ember on lime both land at 3.57:1, which is the
+     one readable pairing the three of them allow. */
 
-  /* State is field-aware: on a light field hue can't carry it (pink on tonic
-     is unreadable), so weight and shape do, and the colour stays ink. On the
-     ink field the two brand colours take over. Overridden per .field below. */
-  --warn: var(--ink);   /* at risk / overdue / needs attention */
-  --ok:   var(--ink);   /* settled / paid / fine */
+  /* Veils, for rules and hovers. Ember-based by default; the ember field
+     flips them to lime below. */
+  --veil-60: rgba(227,66,52,0.62);
+  --veil-45: rgba(227,66,52,0.46);
+  --veil-18: rgba(227,66,52,0.22);
+  --veil-08: rgba(227,66,52,0.10);
 
-  --ink-60: rgba(0,0,0,0.6);
-  --ink-45: rgba(0,0,0,0.45);
-  --ink-18: rgba(0,0,0,0.18);
-  --ink-08: rgba(0,0,0,0.08);
-  --acid-60: rgba(217,251,95,0.6);
-  --acid-45: rgba(217,251,95,0.45);
-  --acid-18: rgba(217,251,95,0.18);
+  /* State. Lilac reads against ember, ember reads against lime, so which one
+     signals "attention" depends on the field. Set per field below. */
+  --warn: var(--ember);
+  --ok:   var(--ember);
 
   --display: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   --data: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
@@ -52,8 +49,8 @@ html {
 
 html, body, #root {
   width: 100%;
-  background: var(--ink);
-  color: var(--ink);
+  background: var(--ember);
+  color: var(--ember);
   font-family: var(--display);
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
@@ -63,13 +60,13 @@ html, body, #root {
 
 body { overflow-x: hidden; }
 
-::selection { background: var(--ink); color: var(--acid); }
-.field--ink ::selection { background: var(--acid); color: var(--ink); }
+::selection { background: var(--ember); color: var(--lime); }
+.field--ember ::selection { background: var(--lime); color: var(--ember); }
 
 ::-webkit-scrollbar { width: 11px; }
-::-webkit-scrollbar-track { background: var(--ink); }
-::-webkit-scrollbar-thumb { background: var(--acid); }
-::-webkit-scrollbar-thumb:hover { background: #fff; }
+::-webkit-scrollbar-track { background: var(--ember); }
+::-webkit-scrollbar-thumb { background: var(--lime); }
+::-webkit-scrollbar-thumb:hover { background: var(--lime); }
 
 :focus-visible {
   outline: 3px solid var(--warn);
@@ -84,11 +81,36 @@ body { overflow-x: hidden; }
   width: 100%;
   padding: clamp(56px, 9vw, 130px) var(--gutter);
 }
-.field--acid { background: var(--tonic); color: var(--ink); }
-.field--ink  { background: var(--ink);  color: var(--tonic); }
-/* On the ink field the two brand colours can carry state directly. */
-.field--ink  { --warn: var(--pink); --ok: var(--tonic); }
-.field--pink { background: var(--pink); color: var(--ink); }
+.field--lime { background: var(--lime); color: var(--ember); }
+.field--ember  { background: var(--ember);  color: var(--lime); }
+/* On ember, the veils have to be lime or they vanish into the field. */
+.field--ember {
+  --warn: var(--lilac);
+  --ok: var(--lime);
+  --veil-60: rgba(212,255,63,0.68);
+  --veil-45: rgba(212,255,63,0.52);
+  --veil-18: rgba(212,255,63,0.24);
+  --veil-08: rgba(212,255,63,0.11);
+}
+.field--lilac { background: var(--lilac); color: var(--ember); }
+/* Nothing in this palette reads as body text on lilac — ember against it is
+   2.19:1. So lilac is a field for display type only, and anything meant to be
+   read sits in an ember card on top of it, where lime gets its 3.57:1. */
+.field--lilac .slab {
+  background: var(--ember);
+  color: var(--lime);
+  border-color: var(--ember);
+  --warn: var(--lilac);
+  --ok: var(--lime);
+  --pill-fg: var(--lime);
+  --pill-inv: var(--ember);
+  --veil-60: rgba(212,255,63,0.68);
+  --veil-45: rgba(212,255,63,0.52);
+  --veil-18: rgba(212,255,63,0.24);
+  --veil-08: rgba(212,255,63,0.11);
+}
+.field--lilac .slab .tag--risk { background: var(--lilac); color: var(--ember); border-color: var(--lilac); }
+.field--lilac .slab .tag--paid { background: var(--lime);  color: var(--ember); border-color: var(--lime); }
 
 .field--flush { padding-top: 0; }
 .field--tight { padding-block: clamp(40px, 6vw, 80px); }
@@ -184,7 +206,7 @@ body { overflow-x: hidden; }
    PILLS & BUTTONS — the only radius in the system
    ========================================================================== */
 .pill {
-  --pill-fg: var(--ink);
+  --pill-fg: var(--ember);
   --pill-bg: transparent;
   position: relative;
   display: inline-flex;
@@ -220,23 +242,23 @@ body { overflow-x: hidden; }
 }
 .pill:hover::before,
 .pill:focus-visible::before { transform: translateY(0); }
-.pill:hover { color: var(--pill-inv, var(--acid)); }
+.pill:hover { color: var(--pill-inv, var(--lime)); }
 .pill:active { transform: scale(0.97); }
 .pill:disabled { opacity: 0.32; cursor: not-allowed; }
 .pill:disabled::before { transform: translateY(101%); }
 
 /* field-aware variants */
-.field--ink .pill,  .pill--on-ink  { --pill-fg: var(--acid); --pill-inv: var(--ink); }
-.field--acid .pill, .pill--on-acid { --pill-fg: var(--ink);  --pill-inv: var(--tonic); }
-.field--pink .pill, .pill--on-pink { --pill-fg: var(--ink);  --pill-inv: var(--pink); }
+.field--ember .pill,  .pill--on-ember  { --pill-fg: var(--lime); --pill-inv: var(--ember); }
+.field--lime .pill, .pill--on-lime { --pill-fg: var(--ember);  --pill-inv: var(--lime); }
+.field--lilac .pill, .pill--on-lilac { --pill-fg: var(--ember);  --pill-inv: var(--lilac); }
 
 /* solid, high-priority action */
-.pill--solid { background: var(--pill-fg); color: var(--pill-inv, var(--acid)); }
-.pill--solid::before { background: var(--pill-inv, var(--acid)); }
+.pill--solid { background: var(--pill-fg); color: var(--pill-inv, var(--lime)); }
+.pill--solid::before { background: var(--pill-inv, var(--lime)); }
 .pill--solid:hover { color: var(--pill-fg); }
 
-.pill--go     { --pill-fg: var(--ok);    --pill-inv: var(--tonic); }
-.pill--stop   { --pill-fg: var(--warn);  --pill-inv: var(--pink); }
+.pill--go     { --pill-fg: var(--ok);    --pill-inv: var(--lime); }
+.pill--stop   { --pill-fg: var(--warn);  --pill-inv: var(--lilac); }
 .pill--lg     { padding: 17px 36px; font-size: 0.95rem; }
 .pill--sm     { padding: 9px 17px;  font-size: 0.72rem; }
 .pill--icon   { padding: 11px; border-radius: 999px; }
@@ -259,17 +281,19 @@ body { overflow-x: hidden; }
   white-space: nowrap;
 }
 .tag--solid  { background: currentColor; }
-.tag--solid > * { color: var(--acid); }
-/* State reads as a filled chip, not as coloured text — pink on tonic is
-   unreadable as type, and red/green were never in this palette. */
-.tag--risk   { background: var(--pink);  color: var(--ink); border-color: var(--ink); }
-.tag--paid   { background: var(--ink);   color: var(--tonic); border-color: var(--ink); }
-.field--ink .tag--risk { background: var(--pink);  color: var(--ink); border-color: var(--pink); }
-.field--ink .tag--paid { background: var(--tonic); color: var(--ink); border-color: var(--tonic); }
-/* On the pink field a pink chip is invisible, so the fill inverts and the two
-   states separate by their type colour instead. */
-.field--pink .tag--risk { background: var(--ink); color: var(--pink);  border-color: var(--ink); }
-.field--pink .tag--paid { background: var(--ink); color: var(--tonic); border-color: var(--ink); }
+.tag--solid > * { color: var(--lime); }
+/* State reads as a filled chip, not as coloured type. With three colours this
+   close in value, hue alone cannot carry it. */
+/* Risk takes the loudest fill available on the field, settled the quietest —
+   it was the other way round, which put the shout on "paid". */
+.tag--risk   { background: var(--ember); color: var(--lime);  border-color: var(--ember); }
+.tag--paid   { background: var(--lilac); color: var(--ember); border-color: var(--ember); }
+.field--ember .tag--risk { background: var(--lime);  color: var(--ember); border-color: var(--lime); }
+.field--ember .tag--paid { background: var(--lilac); color: var(--ember); border-color: var(--lilac); }
+/* On lilac a lilac chip is invisible, so the fill inverts and the two states
+   separate by their type colour instead. */
+.field--lilac .tag--risk { background: var(--ember); color: var(--lilac);  border-color: var(--ember); }
+.field--lilac .tag--paid { background: var(--ember); color: var(--lime); border-color: var(--ember); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; position: relative; }
 /* The pulse is a scaling pseudo-element rather than a spreading box-shadow,
@@ -295,9 +319,9 @@ body { overflow-x: hidden; }
   padding: clamp(18px, 2.4vw, 30px);
   position: relative;
 }
-.slab--fill-ink  { background: var(--ink);  color: var(--acid); }
-.slab--fill-acid { background: var(--acid); color: var(--ink); }
-.slab--fill-bone { background: var(--bone); color: var(--ink); }
+.slab--fill-ember  { background: var(--ember);  color: var(--lime); }
+.slab--fill-lime { background: var(--lime); color: var(--ember); }
+.slab--fill-lilac { background: var(--lilac); color: var(--ember); }
 
 
 .rule { height: 2px; background: currentColor; border: 0; opacity: 1; }
@@ -336,21 +360,24 @@ body { overflow-x: hidden; }
 
 /* ==========================================================================
    LIQUID BLOBS — the one bold move.
-   Yellow fill + difference blend: reads black over the acid field, and knocks
-   the type beneath it out to yellow. Same layer inverts over the ink field.
+   Filled with whichever of the three contrasts with the field beneath it, and
+   split along the wave where it crosses from one field to the next.
    ========================================================================== */
-/* Deliberately NOT inset:0. This is a small box that follows the mass, because
-   the blend makes the compositor re-blend every pixel it covers against the
-   page beneath — a viewport-sized layer pays that on ~2M pixels a frame no
-   matter how small the mass actually is. Size and position come from the
-   component. */
+/* The mass is painted, not blended. It used to difference against the page,
+   which knocked type out neatly but resolved to pure black — and black is not
+   in this palette. It is now filled with whichever of the three colours
+   contrasts with the field it is over, composited normally, which also costs
+   the compositor nothing.
+
+   Deliberately NOT inset:0: a small box that follows the mass, so the layer
+   being composited is a few hundred pixels rather than the viewport. Its size
+   and position come from the component. */
 .blobs {
   position: fixed;
   left: 0;
   top: 0;
   z-index: 50;              /* over every field, under the nav (60) */
   pointer-events: none;
-  mix-blend-mode: difference;
   display: block;
   will-change: transform;
 }
@@ -362,7 +389,7 @@ body { overflow-x: hidden; }
   position: fixed;
   inset: 0;
   z-index: 999;
-  background: var(--ink);
+  background: var(--ember);
   display: grid;
   place-items: center;
   animation: boot-out 0.5s var(--inout) 1.35s forwards;
@@ -371,7 +398,7 @@ body { overflow-x: hidden; }
   width: 54px;
   height: 54px;
   border-radius: 50%;
-  background: var(--acid);
+  background: var(--lime);
   animation: boot-dot 1.35s var(--inout) forwards;
 }
 @keyframes boot-dot {
@@ -394,15 +421,25 @@ body { overflow-x: hidden; }
   justify-content: space-between;
   gap: 16px;
   padding: 18px var(--gutter);
-  color: var(--ink);
+  color: var(--ember);
   /* The plate is painted in whichever field is behind it, so it reads as the
      field simply continuing rather than as a chrome bar — while still stopping
      content from scrolling illegibly under the wordmark. */
-  background: var(--acid);
+  background: var(--lime);
   transition: color 0.45s var(--out), background 0.45s var(--out);
 }
-.nav[data-on='ink']  { color: var(--acid); background: var(--ink); }
-.nav[data-on='pink'] { color: var(--ink);  background: var(--pink); }
+.nav[data-on='ember'] { color: var(--lime);  background: var(--ember); }
+.nav[data-on='lilac'] { color: var(--ember); background: var(--lilac); }
+
+/* The nav is fixed, so it is inside no field and its pills never pick up a
+   field's colours — they kept the root's and went invisible the moment the
+   plate recoloured under them, which is the nav links vanishing over the agent
+   section. Setting the variables on .nav itself does NOT fix it: .pill
+   declares --pill-fg on itself, and a property set on the element beats one
+   inherited from an ancestor. It has to be targeted at the pill. */
+.nav[data-on='lime']  .pill { --pill-fg: var(--ember); --pill-inv: var(--lime); }
+.nav[data-on='ember'] .pill { --pill-fg: var(--lime);  --pill-inv: var(--ember); }
+.nav[data-on='lilac'] .pill { --pill-fg: var(--ember); --pill-inv: var(--lilac); }
 
 .brand {
   display: inline-flex;
@@ -488,8 +525,8 @@ body { overflow-x: hidden; }
   transition: background 0.2s;
 }
 .inp::placeholder { color: currentColor; opacity: 0.38; }
-.inp:focus { background: var(--ink-08); }
-.field--ink .inp:focus, .slab--fill-ink .inp:focus { background: var(--acid-18); }
+.inp:focus { background: var(--veil-08); }
+.field--ember .inp:focus, .slab--fill-ember .inp:focus { background: var(--veil-18); }
 
 .lbl {
   display: block;
@@ -511,7 +548,7 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   position: fixed;
   inset: 0;
   z-index: 300;
-  background: var(--ink-60);
+  background: var(--veil-60);
   display: grid;
   place-items: center;
   padding: 20px;
@@ -523,9 +560,9 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   max-width: 540px;
   max-height: 88vh;
   overflow-y: auto;
-  background: var(--acid);
-  color: var(--ink);
-  border: 2px solid var(--ink);
+  background: var(--lime);
+  color: var(--ember);
+  border: 2px solid var(--ember);
   padding: clamp(22px, 3vw, 34px);
   animation: card-in 0.4s var(--out);
 }
@@ -673,7 +710,7 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
 
 /* A bead circling inside the core while it thinks. */
 .pf-spark {
-  fill: var(--ink);
+  fill: var(--ember);
   transform-box: fill-box;
   transform-origin: 0.21px 0.76px;   /* the core's centre, in viewBox units */
   animation: pf-spark 1.25s linear infinite;
@@ -707,11 +744,11 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
 /* ==========================================================================
    AG GRID — bent into the system
    ========================================================================== */
-.grid-shell { border: 2px solid var(--ink); }
+.grid-shell { border: 2px solid var(--ember); }
 .grid-shell .ag-root-wrapper { border: 0; background: transparent; }
 .grid-shell .ag-header {
-  border-bottom: 2px solid var(--ink);
-  background: var(--ink);
+  border-bottom: 2px solid var(--ember);
+  background: var(--ember);
 }
 .grid-shell .ag-header-cell-text {
   font-family: var(--data);
@@ -719,27 +756,27 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--acid);
+  color: var(--lime);
 }
 .grid-shell .ag-header-cell::after,
 .grid-shell .ag-header-group-cell::after { display: none; }
-.grid-shell .ag-icon { color: var(--acid); }
-.grid-shell .ag-row { border-bottom: 2px solid var(--ink-18); background: transparent; }
-.grid-shell .ag-row-hover { background: var(--ink-08) !important; }
+.grid-shell .ag-icon { color: var(--lime); }
+.grid-shell .ag-row { border-bottom: 2px solid var(--veil-18); background: transparent; }
+.grid-shell .ag-row-hover { background: var(--veil-08) !important; }
 .grid-shell .ag-row-selected,
-.grid-shell .ag-row-selected::before { background: var(--ink) !important; color: var(--acid) !important; }
-.grid-shell .ag-row-selected .ag-cell { color: var(--acid); }
+.grid-shell .ag-row-selected::before { background: var(--ember) !important; color: var(--lime) !important; }
+.grid-shell .ag-row-selected .ag-cell { color: var(--lime); }
 .grid-shell .ag-cell {
   font-family: var(--data);
   font-size: 0.84rem;
   font-variant-numeric: tabular-nums;
-  color: var(--ink);
+  color: var(--ember);
   display: flex;
   align-items: center;
 }
 .grid-shell .ag-cell-focus { outline: none !important; border-color: transparent !important; }
-.grid-shell .ag-paging-panel { border-top: 2px solid var(--ink); color: var(--ink); font-family: var(--data); }
-.grid-shell .ag-overlay-no-rows-center { font-family: var(--data); color: var(--ink); }
+.grid-shell .ag-paging-panel { border-top: 2px solid var(--ember); color: var(--ember); font-family: var(--data); }
+.grid-shell .ag-overlay-no-rows-center { font-family: var(--data); color: var(--ember); }
 
 /* ==========================================================================
    HERO

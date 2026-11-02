@@ -81,8 +81,16 @@ const profile = (u: number) => {
   return 0.9 * Math.pow(1 - v, 1.45) + 0.06;
 };
 
+/** The most each blob's radius can be inflated above its profile value: the
+ *  surface ripple multiplies it, and the box has to allow for that or the mass
+ *  is clipped square against the canvas edge exactly when it is largest. */
+const SWELL = 1.06;
+/** The gap around the body sits on a lower isosurface (0.8), which stands off
+ *  by 1/sqrt(0.8) — everything that sizes the drawing area has to allow for
+ *  it, or the halo is the thing that gets clipped. */
+const EDGE_SCALE = 1.119;
 /** Worst-case reach of the summed field, for sizing the canvas. */
-const REACH = R_HEAD * Math.sqrt(
+const REACH = R_HEAD * SWELL * EDGE_SCALE * Math.sqrt(
   Array.from({ length: N }, (_, i) => profile(i / (N - 1)) ** 2).reduce((a, b) => a + b, 0)
 );
 /** How long a still cursor keeps its mass before it starts retracting. Short
@@ -90,19 +98,40 @@ const REACH = R_HEAD * Math.sqrt(
  *  gap between two pointer events during ordinary movement. */
 const IDLE_AFTER = 110;
 
-/** What the mass is filled with over each field, chosen so that differencing
- *  it against that field lands on the right colour:
- *    tonic field - filled tonic -> black   (ink spreading over tonic)
- *    pink  field - filled pink  -> black   (ink spreading over pink)
- *    ink   field - filled tonic -> tonic
- *  Filling with one colour everywhere, which is what this did, differences
- *  against the other fields to colours that are in no part of the palette. */
+/** What the mass is filled with over each field: whichever of the three reads
+ *  against it. Straddling a divider it is filled with both, split along the
+ *  wave, so it changes colour exactly where the field does.
+ */
+const LIME: [number, number, number] = [0.831, 1.0, 0.247]; // #D4FF3F
+const EMBER: [number, number, number] = [0.890, 0.259, 0.204]; // #E34234
+const LILAC: [number, number, number] = [0.796, 0.702, 0.910]; // #CBB3E8
+
+/** Body: whichever of the three reads against the field. */
 const FILL: Record<string, [number, number, number]> = {
-  acid: [0.851, 0.984, 0.373], // tonic #D9FB5F
-  pink: [1.0, 0.482, 0.710], //  #FF7BB5
-  ink: [0.851, 0.984, 0.373],
+  lime: EMBER,
+  lilac: EMBER,
+  ember: LIME,
 };
-const BOX_AT_FULL_SCALE = Math.ceil(MAX_LEN + 2 * REACH);
+/**
+ * Edge: the field's OWN colour, as a gap around the body.
+ *
+ * Without it the mass is the same colour as the type on that field — ember
+ * body over ember headline — and it reads as a lump welded onto the letters
+ * rather than as something lying over them. The gap is invisible against the
+ * field itself and only shows where the mass crosses type, which is the
+ * knock-out the difference blend used to give, done with palette colours
+ * instead of resolving to black.
+ */
+const EDGE: Record<string, [number, number, number]> = {
+  lime: LIME,
+  lilac: LILAC,
+  ember: EMBER,
+};
+/* Must cover what a fully-extended frame actually asks for, with headroom.
+   Undersized by even a few pixels, fitBox clamps to it and the mass gets cut
+   off against the canvas edge the moment you move fast — which reads exactly
+   like the trail snagging. */
+const BOX_AT_FULL_SCALE = Math.ceil(MAX_LEN + 2 * REACH + 40);
 
 const VERT = `
 attribute vec2 a_pos;
@@ -121,8 +150,10 @@ ${GLSL_WAVE}
 uniform vec2 u_dev;      // backing-store size in device px
 uniform float u_inv;     // 1 / devicePixelRatio
 uniform vec2 u_origin;   // canvas top-left in viewport CSS px
-uniform vec3 u_colA;     // fill above the field boundary
-uniform vec3 u_colB;     // fill below it
+uniform vec3 u_colA;     // body fill above the field boundary
+uniform vec3 u_colB;     // body fill below it
+uniform vec3 u_edgeA;    // the field's own colour, above
+uniform vec3 u_edgeB;    // and below
 uniform vec3 u_band;     // divider rect: top, height, element width (CSS px)
 uniform vec3 u_wave;     // its live wave: phase, amplitude, seed
 uniform float u_hasBand; // 1 when the mass straddles a divider
@@ -140,12 +171,17 @@ void main() {
     field += (r * r) / (dot(d, d) + 1.0);
   }
 
-  float f = field - 1.0;
+  // Two isosurfaces: the body at 1.0, and a slightly larger one at 0.8 that
+  // becomes a gap of the field's own colour around it.
+  float fIn = field - 1.0;
+  float fOut = field - 0.8;
 #ifdef GL_OES_standard_derivatives
   // Analytic AA: one pixel of edge regardless of how steep the field is here.
-  float a = clamp(f / max(fwidth(f), 1e-5) + 0.5, 0.0, 1.0);
+  float aIn = clamp(fIn / max(fwidth(fIn), 1e-5) + 0.5, 0.0, 1.0);
+  float a = clamp(fOut / max(fwidth(fOut), 1e-5) + 0.5, 0.0, 1.0);
 #else
-  float a = smoothstep(-0.06, 0.06, f);
+  float aIn = smoothstep(-0.06, 0.06, fIn);
+  float a = smoothstep(-0.06, 0.06, fOut);
 #endif
 
   // Straddling a divider, each half has to be filled with its own field's
@@ -160,10 +196,13 @@ void main() {
     float vbX = (p.x / max(u_band.z, 1.0)) * ${VB_W}.0;
     split = u_band.x + (tornWaveVbY(vbX, u_wave.x, u_wave.y, u_wave.z) / ${VB_H}.0) * u_band.y;
   }
-  // Stepped, not blended. Both fills difference to the same colour over their
-  // own field, so a hard handover is invisible — whereas blending between them
-  // puts a 1px line of the mixture, which between acid and bone is blue.
-  vec3 col = mix(u_colA, u_colB, step(split, p.y));
+  // Stepped, not blended: the two fills are different colours now, and a
+  // gradient between them would put a band of something that is in no part of
+  // the palette along the whole wave.
+  float side = step(split, p.y);
+  vec3 body = mix(u_colA, u_colB, side);
+  vec3 edge = mix(u_edgeA, u_edgeB, side);
+  vec3 col = mix(edge, body, aIn);
 
   // Premultiplied, to match the context and the ONE / ONE_MINUS_SRC_ALPHA
   // blend. Getting this pair out of step makes the whole canvas composite as
@@ -239,6 +278,8 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     const uOrigin = gl.getUniformLocation(prog, 'u_origin');
     const uColA = gl.getUniformLocation(prog, 'u_colA');
     const uColB = gl.getUniformLocation(prog, 'u_colB');
+    const uEdgeA = gl.getUniformLocation(prog, 'u_edgeA');
+    const uEdgeB = gl.getUniformLocation(prog, 'u_edgeB');
     const uBand = gl.getUniformLocation(prog, 'u_band');
     const uWave = gl.getUniformLocation(prog, 'u_wave');
     const uHasBand = gl.getUniformLocation(prog, 'u_hasBand');
@@ -345,7 +386,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       to: string;
     };
     let bands: Band[] = [];
-    let baseTone = 'acid';
+    let baseTone = 'lime';
 
     const readGeometry = () => {
       geomDirty = false;
@@ -358,13 +399,13 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
             top: r.top,
             height: r.height,
             width: r.width,
-            from: el.dataset.from || 'acid',
-            to: el.dataset.to || 'acid',
+            from: el.dataset.from || 'lime',
+            to: el.dataset.to || 'lime',
           };
         })
         .sort((a, b) => a.top - b.top);
       const first = document.querySelector<HTMLElement>('[data-field]');
-      baseTone = first?.dataset.field || 'acid';
+      baseTone = first?.dataset.field || 'lime';
     };
 
     /** The two fills in play around a given height, and the divider to split
@@ -386,14 +427,17 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       if (near) {
         const wave = waveRegistry.get(near.el);
         return {
-          a: FILL[near.from] || FILL.acid,
-          b: FILL[near.to] || FILL.acid,
+          a: FILL[near.from] || FILL.lime,
+          b: FILL[near.to] || FILL.lime,
+          ea: EDGE[near.from] || EDGE.lime,
+          eb: EDGE[near.to] || EDGE.lime,
           band: near,
           wave,
         };
       }
-      const f = FILL[tone] || FILL.acid;
-      return { a: f, b: f, band: null, wave: undefined };
+      const f = FILL[tone] || FILL.lime;
+      const e = EDGE[tone] || EDGE.lime;
+      return { a: f, b: f, ea: e, eb: e, band: null, wave: undefined };
     };
 
     const onScroll = () => {
@@ -410,22 +454,40 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
        of hovering near it. */
     const MAGNET = 'a, button, .pill, [data-magnet]';
     let quietTarget = 0;
+    /* Magnet state. The pull is NOT applied here: snapping the recorded point
+       to a control's centre the instant the pointer touches it means a fast
+       sweep across the hero yanks the trail sideways at every button it
+       crosses, which looks exactly like the trail catching on things. The
+       target is remembered and the pull is eased in by the loop, and only
+       while the pointer is slow enough to count as hovering rather than
+       passing through. */
+    let magX = 0;
+    let magY = 0;
+    let magWanted = 0;
+    let speed = 0; // smoothed, px/s
 
     const onMove = (e: PointerEvent) => {
       const now = performance.now();
-      let x = e.clientX;
-      let y = e.clientY;
+      const x = e.clientX;
+      const y = e.clientY;
 
       const el = e.target as Element | null;
       quietTarget = el && el.closest && el.closest(QUIET) ? 1 : 0;
 
+      const dtm = Math.max(1, now - lastMove);
+      const inst = Math.hypot(x - tx, y - ty) / (dtm / 1000);
+      speed += (inst - speed) * 0.35;
+
       const mag = el && el.closest ? (el.closest(MAGNET) as HTMLElement | null) : null;
       if (mag && !quietTarget) {
         const r = mag.getBoundingClientRect();
-        // Pull most of the way to the centre, but stay inside the control so
-        // the mass never looks detached from the pointer on a wide button.
-        x += (r.left + r.width / 2 - x) * 0.45;
-        y += (r.top + r.height / 2 - y) * 0.7;
+        magX = r.left + r.width / 2;
+        magY = r.top + r.height / 2;
+        // Only grab when dwelling. Above roughly a flick's speed the pointer is
+        // passing over, not aiming at it.
+        magWanted = speed < 760 ? 1 : 0;
+      } else {
+        magWanted = 0;
       }
 
       tx = x;
@@ -448,6 +510,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     let raf = 0;
     let idleMix = 0; // 0 = following pointer, 1 = fully idle
     let quietMix = 0; // 0 = full mass, 1 = withdrawn over a quiet surface
+    let magMix = 0; // 0 = on the pointer, 1 = pulled onto a control
 
     // Rolling frame-time watch, feeding the resolution step above.
     let samples = 0;
@@ -485,6 +548,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
          retracts to nothing shortly after you stop and comes back the moment
          you move. Touch is the exception — there is no pointer there to answer
          to, so rather than never appearing at all it drifts the hero. */
+      if (now - lastMove > 90) speed *= Math.pow(0.02, dt);
       const idle = coarse ? false : !pointerSeen || now - lastMove > IDLE_AFTER;
       // Asymmetric on purpose: appearing should feel instant, leaving should
       // still be a retraction rather than a cut.
@@ -507,15 +571,25 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       /* Age the trail out from the tail. This is the whole retraction: stop
          moving and the ribbon shortens into the head and goes, without any
          separate "put it away" animation. */
+      // Ease the magnet in and out rather than snapping to it, and let it go
+      // as soon as the pointer speeds up again.
+      if (speed > 1100) magWanted = 0;
+      magMix += (magWanted - magMix) * Math.min(1, dt * (magWanted ? 7 : 11));
+      const hx = tx + (magX - tx) * 0.42 * magMix;
+      const hy = ty + (magY - ty) * 0.62 * magMix;
+
       const cutoff = now - TRAIL_MS;
       while (trail.length && trail[trail.length - 1].t < cutoff) trail.pop();
       if (trail.length === 0 || idleMix > 0.995) {
         trail.length = 0;
-        trail.push({ x: tx, y: ty, t: now });
+        trail.push({ x: hx, y: hy, t: now });
       } else {
-        // Keep the head glued to the pointer between events.
-        trail[0].x = tx;
-        trail[0].y = ty;
+        // Keep the head glued to the pointer between events. Only the head
+        // carries the magnet offset — the body stays on the path the pointer
+        // really took, so the ribbon leans into a control without the whole
+        // trail lurching across to it.
+        trail[0].x = hx;
+        trail[0].y = hy;
       }
 
       /* Resample the path at even arc-length steps, so the metaballs sit on
@@ -622,7 +696,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
 
       // Fit the drawn quad to the mass inside the canvas, in canvas-local clip
       // space. When the mass is compact this is a fraction of the box.
-      const reach = Math.sqrt(reachSq) + 8;
+      const reach = Math.sqrt(reachSq) * EDGE_SCALE + 8;
       const toClipX = (v: number) => ((Math.min(Math.max(v - ox, 0), box) / box) * 2 - 1);
       const toClipY = (v: number) => (1 - (Math.min(Math.max(v - oy, 0), box) / box) * 2);
       const cx0 = toClipX(x0 - reach);
@@ -633,9 +707,11 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, quad);
 
       const cy = (y0 + y1) / 2;
-      const { a: colA, b: colB, band, wave } = fillsAt(cy, reach);
+      const { a: colA, b: colB, ea, eb, band, wave } = fillsAt(cy, reach);
       gl.uniform3f(uColA, colA[0], colA[1], colA[2]);
       gl.uniform3f(uColB, colB[0], colB[1], colB[2]);
+      gl.uniform3f(uEdgeA, ea[0], ea[1], ea[2]);
+      gl.uniform3f(uEdgeB, eb[0], eb[1], eb[2]);
       if (band && wave) {
         gl.uniform3f(uBand, band.top, band.height, band.width);
         gl.uniform3f(uWave, wave.phase, wave.amp, wave.seed);

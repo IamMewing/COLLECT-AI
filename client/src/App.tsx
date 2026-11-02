@@ -14,7 +14,7 @@ import { AddInvoiceForm } from './components/AddInvoiceForm';
 import { useInView } from './useInView';
 import { X } from 'lucide-react';
 
-type Tone = 'acid' | 'ink' | 'pink';
+type Tone = 'lime' | 'ember' | 'lilac';
 
 /** A full-bleed colour field that reveals its contents once, on first sight. */
 const Field: React.FC<{
@@ -198,10 +198,10 @@ export const App: React.FC = () => {
       <main>
         <Hero />
 
-        <Torn from="acid" to="ink" variant={0} />
+        <Torn from="lime" to="ember" variant={0} />
         <Field
           id="agent"
-          tone="ink"
+          tone="ember"
           marker="How it thinks"
           statement="It weighs the money and the odds before it writes a word"
         >
@@ -215,10 +215,10 @@ export const App: React.FC = () => {
           />
         </Field>
 
-        <Torn from="ink" to="acid" variant={1} />
+        <Torn from="ember" to="lime" variant={1} />
         <Field
           id="ledger"
-          tone="acid"
+          tone="lime"
           marker="The ledger"
           statement="Every account it’s watching"
           aside={
@@ -247,10 +247,10 @@ export const App: React.FC = () => {
           </div>
         </Field>
 
-        <Torn from="acid" to="pink" variant={2} />
+        <Torn from="lime" to="lilac" variant={2} />
         <Field
           id="decision"
-          tone="pink"
+          tone="lilac"
           marker="Your call"
           statement="Nothing goes out until you say so"
         >
@@ -264,8 +264,8 @@ export const App: React.FC = () => {
           />
         </Field>
 
-        <Torn from="pink" to="ink" variant={0} />
-        <footer className="field field--ink field--tight" data-field="ink">
+        <Torn from="lilac" to="ember" variant={0} />
+        <footer className="field field--ember field--tight" data-field="ink">
           <div className="wrap">
             <h2 className="mega" style={{ marginBottom: 'clamp(28px, 4vw, 56px)' }}>Get paid.</h2>
             <dl className="readouts">

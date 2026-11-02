@@ -17,7 +17,7 @@ const Mark: React.FC = () => (
  * carrying its own background plate.
  */
 export const Nav: React.FC = () => {
-  const [on, setOn] = useState<'acid' | 'ink' | 'pink'>('acid');
+  const [on, setOn] = useState<'lime' | 'ember' | 'lilac'>('lime');
 
   useEffect(() => {
     let raf = 0;
@@ -30,7 +30,7 @@ export const Nav: React.FC = () => {
       for (const el of fields) {
         const r = el.getBoundingClientRect();
         if (r.top <= probe && r.bottom > probe) {
-          setOn((el.dataset.field as 'acid' | 'ink' | 'pink') ?? 'acid');
+          setOn((el.dataset.field as 'lime' | 'ember' | 'lilac') ?? 'lime');
           return;
         }
       }

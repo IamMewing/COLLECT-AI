@@ -17,15 +17,15 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 /* The table has to read as part of the yellow field, not as a widget dropped
    onto it: acid background, black rules, inverted black header. */
 const gridTheme = themeQuartz.withParams({
-  accentColor: '#000000',
-  backgroundColor: '#D9FB5F',
-  dataBackgroundColor: '#D9FB5F',
-  foregroundColor: '#000000',
-  textColor: '#000000',
-  borderColor: 'rgba(0,0,0,0.20)',
-  headerBackgroundColor: '#000000',
-  headerTextColor: '#D9FB5F',
-  rowHoverColor: 'rgba(0,0,0,0.07)',
+  accentColor: '#E34234',
+  backgroundColor: '#D4FF3F',
+  dataBackgroundColor: '#D4FF3F',
+  foregroundColor: '#E34234',
+  textColor: '#E34234',
+  borderColor: 'rgba(227,66,52,0.26)',
+  headerBackgroundColor: '#E34234',
+  headerTextColor: '#D4FF3F',
+  rowHoverColor: 'rgba(227,66,52,0.10)',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
   borderRadius: 0,
   spacing: 7,
@@ -82,7 +82,9 @@ export const InvoiceGrid: React.FC<InvoiceGridProps> = ({
         // red in this palette, and pink as type on tonic is unreadable.
         cellStyle: (p) =>
           (p.value ?? 0) > 30
-            ? { background: '#FF7BB5', color: '#000000', fontWeight: 800 }
+            // Lilac, so the flag survives on an ember-filled selected row as
+            // well as on a lime one — an ember flag disappears into the former.
+            ? { background: '#CBB3E8', color: '#E34234', fontWeight: 800 }
             : { background: 'transparent', color: 'inherit', fontWeight: 400 },
       },
       { field: 'ignored_reminders', headerName: 'Ignored', type: 'numericColumn', width: 112 },

@@ -319,13 +319,20 @@ body { overflow-x: hidden; }
    Yellow fill + difference blend: reads black over the acid field, and knocks
    the type beneath it out to yellow. Same layer inverts over the ink field.
    ========================================================================== */
+/* Deliberately NOT inset:0. This is a small box that follows the mass, because
+   the blend makes the compositor re-blend every pixel it covers against the
+   page beneath — a viewport-sized layer pays that on ~2M pixels a frame no
+   matter how small the mass actually is. Size and position come from the
+   component. */
 .blobs {
   position: fixed;
-  inset: 0;
+  left: 0;
+  top: 0;
   z-index: 50;              /* over every field, under the nav (60) */
   pointer-events: none;
   mix-blend-mode: difference;
   display: block;
+  will-change: transform;
 }
 
 /* ==========================================================================

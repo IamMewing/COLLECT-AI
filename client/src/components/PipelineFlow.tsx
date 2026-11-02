@@ -16,16 +16,21 @@ type NodeStatus = 'idle' | 'active' | 'done' | 'skipped' | 'error';
 
 interface NodeDef { id: string; name: string; sub: string; x: number; y: number; }
 
+/** Rows and the baseline the whole panel is measured against. */
+const TOP_ROW = 5;
+const BOTTOM_ROW = 20;
+const BASE = 24.4;
+
 /** Mirrors the real strands Graph in agent/graph.py: risk and probability are
  *  parallel entry points, they fan into plan, plan conditionally reaches draft,
  *  and reflection runs after the human decides.
  *  x sits each node directly above its own readout column below. */
 const NODES: NodeDef[] = [
-  { id: 'risk',        name: 'Score the risk',  sub: 'how much is at stake',   x: 10, y: 5 },
-  { id: 'probability', name: 'Predict payment', sub: 'will they pay anyway',   x: 30, y: 5 },
-  { id: 'plan',        name: 'Decide',          sub: 'chase, or leave it',     x: 50, y: 20 },
-  { id: 'draft',       name: 'Write it',        sub: 'tone matched to history', x: 70, y: 20 },
-  { id: 'reflect',     name: 'Learn',           sub: 'after your decision',    x: 90, y: 20 },
+  { id: 'risk',        name: 'Score the risk',  sub: 'how much is at stake',   x: 10, y: TOP_ROW },
+  { id: 'probability', name: 'Predict payment', sub: 'will they pay anyway',   x: 30, y: TOP_ROW },
+  { id: 'plan',        name: 'Decide',          sub: 'chase, or leave it',     x: 50, y: BOTTOM_ROW },
+  { id: 'draft',       name: 'Write it',        sub: 'tone matched to history', x: 70, y: BOTTOM_ROW },
+  { id: 'reflect',     name: 'Learn',           sub: 'after your decision',    x: 90, y: BOTTOM_ROW },
 ];
 
 const EDGES: [string, string][] = [
@@ -38,7 +43,7 @@ const EDGES: [string, string][] = [
 const ACID = '#FFE500';
 const MINT = '#00B85F';
 const BLOOD = '#FF2D1F';
-const DIM = 'rgba(255,229,0,0.26)';
+const DIM = 'rgba(255,229,0,0.34)';
 const MUTED = 'rgba(255,229,0,0.5)';
 
 const node = (id: string) => NODES.find((n) => n.id === id)!;
@@ -177,7 +182,7 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
   return (
     <div ref={viewRef} className={`pf${drawn ? ' pf--in' : ''}`}>
       <svg
-        viewBox="0 0 100 25"
+        viewBox="0 0 100 26.5"
         preserveAspectRatio="xMidYMid meet"
         style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
         aria-label="Agent reasoning graph"
@@ -194,6 +199,35 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
           ))}
         </defs>
 
+        {/* Baseline: an axis with a tick under every node, so the graph reads
+            as an instrument reporting on columns rather than a loose diagram,
+            and each node is visibly tied to the readout beneath it. */}
+        <g className="pf-base">
+          <line x1="0" y1={BASE} x2="100" y2={BASE} stroke={DIM} strokeWidth="0.12" />
+          {NODES.map((n) => (
+            <g key={n.id}>
+              <line
+                x1={n.x} y1={n.y} x2={n.x} y2={BASE}
+                stroke={DIM}
+                strokeWidth="0.1"
+                strokeDasharray="0.4 0.6"
+              />
+              <line x1={n.x} y1={BASE - 0.6} x2={n.x} y2={BASE + 0.6} stroke={DIM} strokeWidth="0.16" />
+            </g>
+          ))}
+          {Array.from({ length: 21 }, (_, i) => i * 5).map((x) => (
+            <line key={x} x1={x} y1={BASE} x2={x} y2={BASE + 0.3} stroke={DIM} strokeWidth="0.07" />
+          ))}
+        </g>
+
+        {/* A slow sweep across the panel. Nothing on screen should ever be
+            completely still, least of all the part claiming to be thinking. */}
+        <g className="pf-sweep">
+          <line x1="0" y1="1.5" x2="0" y2={BASE} stroke={ACID} strokeWidth="0.13" opacity="0.5" />
+          <line x1="-1.1" y1="3" x2="-1.1" y2={BASE} stroke={ACID} strokeWidth="0.09" opacity="0.22" />
+          <line x1="-2.4" y1="5" x2="-2.4" y2={BASE} stroke={ACID} strokeWidth="0.07" opacity="0.1" />
+        </g>
+
         {EDGES.map(([from, to], i) => {
           const state = edgeState(from, to);
           const stroke = state === 'live' ? ACID : state === 'done' ? MINT : state === 'skipped' ? MUTED : DIM;
@@ -202,7 +236,7 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
             <g key={`${from}-${to}`}>
               <use
                 href={`#pf-${from}-${to}`}
-                className="pf-edge"
+                className={`pf-edge${state === 'idle' ? ' pf-edge--march' : ''}`}
                 stroke={stroke}
                 strokeWidth={state === 'idle' ? 0.2 : 0.38}
                 strokeLinecap="round"
@@ -235,8 +269,33 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
           return (
             <g key={n.id} transform={`translate(${n.x}, ${n.y})`}>
               <g className="pf-node" style={{ ['--i' as string]: i }}>
-                {active && <circle r="1.7" fill="none" stroke={color} strokeWidth="0.26" className="pf-ring" />}
-                {active && <circle r="1.7" fill="none" stroke={color} strokeWidth="0.26" className="pf-ring pf-ring--2" />}
+                {/* Gauge collar: a dashed ring reads as graduations, and it
+                    turns, slowly when waiting and hard while working. */}
+                <circle
+                  className={`pf-collar${active ? ' pf-collar--spin' : ''}`}
+                  r="2.45"
+                  fill="none"
+                  stroke={color}
+                  strokeWidth="0.16"
+                  strokeDasharray="0.26 0.74"
+                  opacity={status === 'idle' ? 0.5 : 0.85}
+                />
+                {active && <circle r="1.9" fill="none" stroke={color} strokeWidth="0.26" className="pf-ring" />}
+                {active && <circle r="1.9" fill="none" stroke={color} strokeWidth="0.26" className="pf-ring pf-ring--2" />}
+                {/* A settled node closes a solid arc over the collar — the
+                    gauge reading that this step is locked in. */}
+                {(done || status === 'skipped') && (
+                  <circle
+                    className="pf-lock"
+                    r="2.45"
+                    fill="none"
+                    stroke={color}
+                    strokeWidth="0.3"
+                    pathLength="1"
+                    strokeDasharray="1"
+                    opacity={status === 'skipped' ? 0.45 : 1}
+                  />
+                )}
                 <circle
                   className={done ? 'pf-dot pf-dot--breathe' : 'pf-dot'}
                   r="1.3"
@@ -244,6 +303,15 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
                   stroke={color}
                   strokeWidth="0.38"
                 />
+                <text
+                  className="pf-index"
+                  x="0"
+                  y="-3.5"
+                  fill={color}
+                  opacity={status === 'idle' ? 0.55 : 0.9}
+                >
+                  {String(i + 1).padStart(2, '0')}
+                </text>
               </g>
             </g>
           );

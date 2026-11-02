@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { W as VB_W, H as VB_H, GLSL_WAVE, waveRegistry } from './tornWave';
 
 /**
  * The signature move: a liquid mass of ink that trails the pointer across the
@@ -36,15 +37,22 @@ import React, { useEffect, useRef } from 'react';
  * elongates along its own velocity, so the body stretches when thrown.
  */
 
+/** More nodes than the shape strictly needs: a long chain of small steps
+ *  merges into a smooth body, where a short chain of big ones reads as a few
+ *  circles overlapping. Damping falls off down the chain as well as stiffness,
+ *  so the tail keeps its momentum longer than the head and whips round behind
+ *  it instead of trailing in a straight line. */
 const CHAIN = [
-  { r: 72, k: 1.000 }, // head: pinned to the pointer, k unused
-  { r: 66, k: 0.150 },
-  { r: 59, k: 0.098 },
-  { r: 52, k: 0.070 },
-  { r: 45, k: 0.052 },
-  { r: 38, k: 0.040 },
-  { r: 31, k: 0.031 },
-  { r: 24, k: 0.024 },
+  { r: 66, k: 1.000, d: 0.860 }, // head: pinned to the pointer, k unused
+  { r: 62, k: 0.150, d: 0.865 },
+  { r: 58, k: 0.110, d: 0.870 },
+  { r: 54, k: 0.086, d: 0.875 },
+  { r: 49, k: 0.070, d: 0.880 },
+  { r: 44, k: 0.057, d: 0.885 },
+  { r: 38, k: 0.047, d: 0.890 },
+  { r: 32, k: 0.039, d: 0.895 },
+  { r: 25, k: 0.032, d: 0.900 },
+  { r: 18, k: 0.026, d: 0.905 },
 ];
 const N = CHAIN.length;
 
@@ -56,16 +64,29 @@ const N = CHAIN.length;
  * as a side effect bounds the chain's total extent, which is what lets the
  * canvas be a fixed size.
  */
-const LINK_MAX = CHAIN.slice(0, -1).map((b, i) => 0.62 * (b.r + CHAIN[i + 1].r));
+const LINK_MAX = CHAIN.slice(0, -1).map((b, i) => 0.52 * (b.r + CHAIN[i + 1].r));
 /** Worst-case extent of the whole mass: every link at full stretch, plus the
  *  reach of the field around the ends. */
 const SPAN = LINK_MAX.reduce((a, b) => a + b, 0);
 const REACH = Math.sqrt(CHAIN.reduce((a, b) => a + b.r * b.r, 0));
-const MAX_STRETCH = 1.55;
-/** How long a still cursor keeps its mass before it starts retracting. Long
- *  enough not to flicker on the pauses inside ordinary pointer movement,
- *  short enough that stopping to read clears the page. */
-const IDLE_AFTER = 650;
+const MAX_STRETCH = 1.42;
+/** How long a still cursor keeps its mass before it starts retracting. Short
+ *  enough to read as "gone the moment you stop", long enough to survive the
+ *  gap between two pointer events during ordinary movement. */
+const IDLE_AFTER = 130;
+
+/** What the mass is filled with over each field, chosen so that differencing
+ *  it against that field lands on the right colour:
+ *    acid field - filled acid -> black    (ink spreading over yellow)
+ *    bone field - filled bone -> black    (ink spreading over bone)
+ *    ink  field - filled acid -> acid     (yellow over black)
+ *  Filling with acid everywhere, which is what this did, differences against
+ *  bone to a vivid blue — a colour that appears nowhere in the palette. */
+const FILL: Record<string, [number, number, number]> = {
+  acid: [1.0, 0.898, 0.0],
+  bone: [0.949, 0.937, 0.894],
+  ink: [1.0, 0.898, 0.0],
+};
 const BOX_AT_FULL_SCALE = Math.ceil(SPAN + 2 * REACH * MAX_STRETCH);
 
 const VERT = `
@@ -77,10 +98,16 @@ void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
 const FRAG = `
 #extension GL_OES_standard_derivatives : enable
 precision highp float;
+${GLSL_WAVE}
 
 uniform vec2 u_dev;      // backing-store size in device px
 uniform float u_inv;     // 1 / devicePixelRatio
 uniform vec2 u_origin;   // canvas top-left in viewport CSS px
+uniform vec3 u_colA;     // fill above the field boundary
+uniform vec3 u_colB;     // fill below it
+uniform vec3 u_band;     // divider rect: top, height, element width (CSS px)
+uniform vec3 u_wave;     // its live wave: phase, amplitude, seed
+uniform float u_hasBand; // 1 when the mass straddles a divider
 uniform vec4 u_blob[${N}];
 uniform vec2 u_dir[${N}];
 
@@ -111,10 +138,27 @@ void main() {
   float a = smoothstep(-0.06, 0.06, f);
 #endif
 
+  // Straddling a divider, each half has to be filled with its own field's
+  // colour or one of them differences to the wrong thing. One pixel of blend
+  // across the boundary; the dividers wave by about 15px either side of this
+  // line, which at a soft edge is not something the eye picks up.
+  // Where the boundary sits at THIS pixel's x, evaluated from the same three
+  // sines the divider is drawn with — a flat split leaves a hairline of the
+  // wrong colour along the whole wave.
+  float split = u_band.x + u_band.y * 0.5;
+  if (u_hasBand > 0.5) {
+    float vbX = (p.x / max(u_band.z, 1.0)) * ${VB_W}.0;
+    split = u_band.x + (tornWaveVbY(vbX, u_wave.x, u_wave.y, u_wave.z) / ${VB_H}.0) * u_band.y;
+  }
+  // Stepped, not blended. Both fills difference to the same colour over their
+  // own field, so a hard handover is invisible — whereas blending between them
+  // puts a 1px line of the mixture, which between acid and bone is blue.
+  vec3 col = mix(u_colA, u_colB, step(split, p.y));
+
   // Premultiplied, to match the context and the ONE / ONE_MINUS_SRC_ALPHA
   // blend. Getting this pair out of step makes the whole canvas composite as
   // opaque, which with a difference blend inverts the page.
-  gl_FragColor = vec4(vec3(1.0, 0.898, 0.0) * a, a);
+  gl_FragColor = vec4(col * a, a);
 }
 `;
 
@@ -183,6 +227,11 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     const uDev = gl.getUniformLocation(prog, 'u_dev');
     const uInv = gl.getUniformLocation(prog, 'u_inv');
     const uOrigin = gl.getUniformLocation(prog, 'u_origin');
+    const uColA = gl.getUniformLocation(prog, 'u_colA');
+    const uColB = gl.getUniformLocation(prog, 'u_colB');
+    const uBand = gl.getUniformLocation(prog, 'u_band');
+    const uWave = gl.getUniformLocation(prog, 'u_wave');
+    const uHasBand = gl.getUniformLocation(prog, 'u_hasBand');
     const uBlob = gl.getUniformLocation(prog, 'u_blob');
     const uDir = gl.getUniformLocation(prog, 'u_dir');
 
@@ -197,7 +246,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     /* Resolution is adaptive. A soft-edged shape hides a low sample rate well,
        and a machine that cannot hold 60 at full resolution is far better served
        by a slightly softer mass that does. */
-    const DPR_STEPS = [1.5, 1.25, 1.0, 0.8, 0.62];
+    const DPR_STEPS = [1.5, 1.25, 1.0, 0.8, 0.62, 0.5, 0.4];
     let dprStep = 1;
     let dpr = 1;
 
@@ -238,7 +287,11 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       }
     };
 
+    // Declared before resize(), which runs immediately and marks it stale.
+    let geomDirty = true;
+
     const resize = () => {
+      geomDirty = true;
       w = window.innerWidth;
       h = window.innerHeight;
       scale = Math.max(0.46, Math.min(1, w / 1240));
@@ -257,6 +310,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     const vy = new Float32Array(N);
     const blobData = new Float32Array(N * 4);
     const dirData = new Float32Array(N * 2);
+    const link = new Float32Array(N); // how extended each node's link is, 0..1
 
     let tx = w * 0.5;
     let ty = h * 0.42;
@@ -269,6 +323,74 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     let pointerSeen = false;
     let lastMove = 0;
     const idleAnchor = { x: tx, y: ty };
+
+    /* Where the colour fields start and stop, so the fill can be chosen to
+       difference correctly against whatever is behind the mass. Read from the
+       DOM because the page owns that layout, cached because it only changes on
+       scroll and resize. */
+    type Band = {
+      el: HTMLElement;
+      top: number;
+      height: number;
+      width: number;
+      from: string;
+      to: string;
+    };
+    let bands: Band[] = [];
+    let baseTone = 'acid';
+
+    const readGeometry = () => {
+      geomDirty = false;
+      const divs = document.querySelectorAll<HTMLElement>('.torn[data-from][data-to]');
+      bands = Array.from(divs)
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            el,
+            top: r.top,
+            height: r.height,
+            width: r.width,
+            from: el.dataset.from || 'acid',
+            to: el.dataset.to || 'acid',
+          };
+        })
+        .sort((a, b) => a.top - b.top);
+      const first = document.querySelector<HTMLElement>('[data-field]');
+      baseTone = first?.dataset.field || 'acid';
+    };
+
+    /** The two fills in play around a given height, and the divider to split
+     *  them along. Away from any divider both fills are the same and the split
+     *  is irrelevant. */
+    const fillsAt = (y: number, span: number) => {
+      if (geomDirty) readGeometry();
+      let tone = baseTone;
+      let near: Band | null = null;
+      for (const band of bands) {
+        // Compare against the wave's own middle, not the element's, so the
+        // handover happens where the colour actually changes.
+        const mid = band.top + band.height / 2;
+        if (y > mid) tone = band.to;
+        // Straddling counts generously: the amplitude swells with scroll, so
+        // the curve can reach beyond the element's midline.
+        if (y > band.top - span && y < band.top + band.height + span) near = band;
+      }
+      if (near) {
+        const wave = waveRegistry.get(near.el);
+        return {
+          a: FILL[near.from] || FILL.acid,
+          b: FILL[near.to] || FILL.acid,
+          band: near,
+          wave,
+        };
+      }
+      const f = FILL[tone] || FILL.acid;
+      return { a: f, b: f, band: null, wave: undefined };
+    };
+
+    const onScroll = () => {
+      geomDirty = true;
+    };
 
     /* The mass inverts everything it covers, which is the point of it — but
        held over a table of figures or a field someone is typing into, that
@@ -287,7 +409,6 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     };
 
     /* ── loop ───────────────────────────────────────────────────────────── */
-    const DAMP = 0.855;
     const STEP = 1 / 120; // fixed physics step, so 60Hz and 144Hz agree
     let acc = 0;
     let prev = performance.now();
@@ -333,7 +454,9 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
          you move. Touch is the exception — there is no pointer there to answer
          to, so rather than never appearing at all it drifts the hero. */
       const idle = coarse ? false : !pointerSeen || now - lastMove > IDLE_AFTER;
-      idleMix += ((idle ? 1 : 0) - idleMix) * Math.min(1, dt * 4.4);
+      // Asymmetric on purpose: appearing should feel instant, leaving should
+      // still be a retraction rather than a cut.
+      idleMix += ((idle ? 1 : 0) - idleMix) * Math.min(1, dt * (idle ? 11 : 20));
       quietMix += (quietTarget - quietMix) * Math.min(1, dt * 6.5);
 
       if (coarse) {
@@ -377,22 +500,28 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
 
         for (let i = 1; i < N; i++) {
           const k = CHAIN[i].k;
-          vx[i] = (vx[i] + (px[i - 1] - px[i]) * k) * DAMP;
-          vy[i] = (vy[i] + (py[i - 1] - py[i]) * k) * DAMP;
+          vx[i] = (vx[i] + (px[i - 1] - px[i]) * k) * CHAIN[i].d;
+          vy[i] = (vy[i] + (py[i - 1] - py[i]) * k) * CHAIN[i].d;
           px[i] += vx[i];
           py[i] += vy[i];
 
-          // Hard limit on how far this node may fall behind, so the field
-          // always has enough overlap to stay one body.
+          // Limit on how far this node may fall behind, so the field always
+          // has enough overlap to stay one body. Corrected most of the way
+          // rather than snapped exactly: applied every substep it converges in
+          // two or three, and the give is what keeps the chain from feeling
+          // like a rigid string of beads.
           const lim = LINK_MAX[i - 1] * scale;
           const dx = px[i] - px[i - 1];
           const dy = py[i] - py[i - 1];
           const d2 = dx * dx + dy * dy;
           if (d2 > lim * lim) {
-            const inv = lim / Math.sqrt(d2);
-            px[i] = px[i - 1] + dx * inv;
-            py[i] = py[i - 1] + dy * inv;
+            const dist = Math.sqrt(d2);
+            const pull = (dist - lim) * 0.74;
+            px[i] -= (dx / dist) * pull;
+            py[i] -= (dy / dist) * pull;
           }
+          // Record the link's extension for the volume term below.
+          link[i] = Math.min(1, Math.sqrt(d2) / lim);
         }
       }
 
@@ -405,9 +534,21 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
         const o = i * 4;
         blobData[o] = px[i];
         blobData[o + 1] = py[i];
+
+        // Volume: a stretched link thins the body it is pulling, a slack one
+        // lets it swell back. Without this the mass changes shape but never
+        // changes substance, which is most of what made it read as a solid
+        // being dragged rather than as liquid.
+        const thin = 1 - 0.15 * link[i];
+        // And a slow travelling wobble around the surface, so the boundary is
+        // never perfectly circular. Phase runs down the chain, so it reads as
+        // one ripple passing through the body rather than each blob pulsing.
+        const wob = 1 + 0.05 * Math.sin(t * 2.3 - i * 0.75);
+
         // Retracts to nothing when the cursor stops, and withdraws to nothing
         // over a surface someone is trying to read or type into.
-        blobData[o + 2] = CHAIN[i].r * scale * (1 - idleMix) * (1 - quietMix);
+        blobData[o + 2] =
+          CHAIN[i].r * scale * thin * wob * (1 - idleMix) * (1 - quietMix);
         blobData[o + 3] = 1 + Math.min(MAX_STRETCH - 1, sp * 0.042);
       }
 
@@ -466,6 +607,21 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       quad.set([cx0, cy0, cx1, cy0, cx0, cy1, cx0, cy1, cx1, cy0, cx1, cy1]);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, quad);
 
+      const cy = (y0 + y1) / 2;
+      const { a: colA, b: colB, band, wave } = fillsAt(cy, reach);
+      gl.uniform3f(uColA, colA[0], colA[1], colA[2]);
+      gl.uniform3f(uColB, colB[0], colB[1], colB[2]);
+      if (band && wave) {
+        gl.uniform3f(uBand, band.top, band.height, band.width);
+        gl.uniform3f(uWave, wave.phase, wave.amp, wave.seed);
+        gl.uniform1f(uHasBand, 1);
+      } else {
+        // No divider in range: both fills are equal, so the split only has to
+        // be somewhere that doesn't cut through the mass.
+        gl.uniform3f(uBand, cy * 2 + 4000, 1, Math.max(w, 1));
+        gl.uniform1f(uHasBand, 0);
+      }
+
       gl.uniform4fv(uBlob, blobData);
       gl.uniform2fv(uDir, dirData);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -474,11 +630,13 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
     raf = requestAnimationFrame(tick);
     if (!coarse) window.addEventListener('pointermove', onMove, { passive: true });
     window.addEventListener('resize', resize);
+    window.addEventListener('scroll', onScroll, { passive: true });
 
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('resize', resize);
+      window.removeEventListener('scroll', onScroll);
       // Deliberately NOT calling WEBGL_lose_context here. A lost context is
       // permanent for that canvas — getContext hands the dead one back — so
       // any remount (StrictMode's double-invoke, most obviously) would get a

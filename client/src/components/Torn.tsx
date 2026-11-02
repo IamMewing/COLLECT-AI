@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { W, H, STEPS, OVER, waveVbY, waveRegistry } from './tornWave';
 
 type Tone = 'acid' | 'ink' | 'bone';
 
@@ -7,10 +8,6 @@ const HEX: Record<Tone, string> = {
   ink: '#000000',
   bone: '#F2EFE4',
 };
-
-const W = 1200;
-const H = 120;
-const STEPS = 44;
 
 /**
  * The boundary between two colour fields, as a wave that actually moves.
@@ -31,14 +28,7 @@ const STEPS = 44;
 const buildPath = (phase: number, amp: number, seed: number) => {
   const ys: number[] = [];
   for (let i = 0; i <= STEPS; i++) {
-    const x = (i / STEPS) * W;
-    ys.push(
-      H * 0.5 +
-        amp *
-          (1.0 * Math.sin(x * 0.0061 + phase * 1.00 + seed) +
-            0.56 * Math.sin(x * 0.0117 - phase * 1.43 + seed * 2.1) +
-            0.3 * Math.sin(x * 0.0223 + phase * 0.81 + seed * 3.7))
-    );
+    ys.push(waveVbY((i / STEPS) * W, phase, amp, seed));
   }
 
   let d = `M0,${ys[0].toFixed(2)}`;
@@ -49,7 +39,13 @@ const buildPath = (phase: number, amp: number, seed: number) => {
       (ys[i] + ys[i + 1]) / 2
     ).toFixed(2)}`;
   }
-  d += ` L${W},${ys[STEPS].toFixed(2)} L${W},${H} L0,${H} Z`;
+  // Closes UPWARD, past the top of the viewBox. The element's own background is
+  // the colour of the field below, so the fill painted here is the field above.
+  // Done the other way round, the element's bottom row is a half-covered edge
+  // of the lower fill with the upper colour behind it, and subpixel rounding
+  // turns that into a hairline of the wrong colour straight across the page —
+  // visible or not depending on where the divider happens to land.
+  d += ` L${W},${ys[STEPS].toFixed(2)} L${W},${-OVER} L0,${-OVER} Z`;
   return d;
 };
 
@@ -78,7 +74,10 @@ export const Torn: React.FC<TornProps> = ({ from, to, variant = 0 }) => {
 
     if (reduced) {
       path.setAttribute('d', buildPath(seed, BASE_AMP, seed));
-      return;
+      waveRegistry.set(host, { phase: seed, amp: BASE_AMP, seed });
+      return () => {
+        waveRegistry.delete(host);
+      };
     }
 
     let scrollPhase = window.scrollY * 0.0042;
@@ -115,7 +114,10 @@ export const Torn: React.FC<TornProps> = ({ from, to, variant = 0 }) => {
 
       const t = (now - t0) / 1000;
       const phase = scrollPhase + t * 0.17 + seed;
-      path.setAttribute('d', buildPath(phase, BASE_AMP * (1 + surge * 0.85), seed));
+      const amp = BASE_AMP * (1 + surge * 0.85);
+      path.setAttribute('d', buildPath(phase, amp, seed));
+      // Publish it: the cursor mass splits its fill along this exact curve.
+      waveRegistry.set(host, { phase, amp, seed });
     };
 
     raf = requestAnimationFrame(tick);
@@ -124,13 +126,21 @@ export const Torn: React.FC<TornProps> = ({ from, to, variant = 0 }) => {
       cancelAnimationFrame(raf);
       io.disconnect();
       window.removeEventListener('scroll', onScroll);
+      waveRegistry.delete(host);
     };
   }, [variant]);
 
   return (
-    <div ref={hostRef} className="torn" style={{ background: HEX[from] }} aria-hidden="true">
+    <div
+      ref={hostRef}
+      className="torn"
+      style={{ background: HEX[to] }}
+      data-from={from}
+      data-to={to}
+      aria-hidden="true"
+    >
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        <path ref={pathRef} fill={HEX[to]} d={buildPath(variant * 2.4, 17, variant * 2.4)} />
+        <path ref={pathRef} fill={HEX[from]} d={buildPath(variant * 2.4, 17, variant * 2.4)} />
       </svg>
     </div>
   );

@@ -583,6 +583,50 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   50%      { transform: scale(1.14); }
 }
 
+/* Graduated collar around each node. It turns slowly while the step is
+   waiting and hard while it is working, so the panel reads as instrumented
+   rather than drawn. */
+.pf-collar {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pf-spin 34s linear infinite;
+}
+.pf-collar--spin { animation-duration: 2.6s; }
+@keyframes pf-spin { to { transform: rotate(360deg); } }
+
+/* The arc that closes over the collar once a step is settled. */
+.pf-lock {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pf-lock 0.7s var(--out) backwards;
+}
+@keyframes pf-lock {
+  from { stroke-dashoffset: 1; transform: rotate(-90deg); }
+  to   { stroke-dashoffset: 0; transform: rotate(-90deg); }
+}
+
+/* Idle edges march rather than sit, so an untouched graph still looks live. */
+.pf-edge--march { animation: pf-march 2.4s linear infinite; }
+@keyframes pf-march {
+  from { stroke-dasharray: 0.016 0.024; stroke-dashoffset: 0.08; }
+  to   { stroke-dasharray: 0.016 0.024; stroke-dashoffset: 0; }
+}
+
+.pf-index {
+  font-family: var(--data);
+  font-size: 1.15px;        /* viewBox units */
+  letter-spacing: 0.08px;
+  text-anchor: middle;
+}
+
+.pf-base { pointer-events: none; }
+
+.pf-sweep { animation: pf-sweep 7.5s linear infinite; }
+@keyframes pf-sweep {
+  from { transform: translateX(-4px); }    /* viewBox units */
+  to   { transform: translateX(106px); }
+}
+
 .pf-ring { transform-origin: center; animation: pf-ring 1.6s ease-out infinite; }
 .pf-ring--2 { animation-delay: 0.8s; }
 @keyframes pf-ring {

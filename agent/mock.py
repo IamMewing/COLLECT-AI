@@ -101,16 +101,22 @@ def mock_run_sweep(invoice: dict) -> dict:
             "firm": f"Hi {client}, following up on an overdue balance.",
             "urgent": f"Hi {client} — this needs prompt attention.",
         }.get(plan.tone, f"Hi {client},")
+        closer = {
+            "friendly": "No rush if it's already on its way — just flagging it.",
+            "firm": "Could you confirm when this will be settled?",
+            "urgent": "Please treat this as time-sensitive and confirm today.",
+        }.get(plan.tone, "Let me know where this stands.")
         draft = DraftedMessage(
-            subject=f"[MOCK DRAFT] Invoice follow-up — {invoice.get('invoice_id', 'N/A')}",
+            subject=f"Invoice {invoice.get('invoice_id', 'N/A')} — outstanding balance",
             body=(
                 f"{tone_opener}\n\n"
-                f"[This is a MOCK, templated draft — not real Claude reasoning. "
-                f"Real drafts will be written in your voice, tone-matched to this "
-                f"client's history.]\n\n"
-                f"Invoice amount: INR {invoice['amount']:,.0f}, "
-                f"{invoice['days_overdue']} days overdue.\n\n"
-                f"{{{{PAYMENT_LINK}}}}"
+                f"Invoice {invoice.get('invoice_id', 'N/A')} for INR "
+                f"{invoice['amount']:,.0f} is {invoice['days_overdue']} days past due. "
+                f"{closer}\n\n"
+                f"You can settle it here:\n"
+                f"{{{{PAYMENT_LINK}}}}\n\n"
+                f"(Offline mode: this draft is templated rather than model-written. "
+                f"Set USE_MOCK=false to have the agent write it.)"
             ),
             channel=plan.channel if plan.channel in ("email", "whatsapp") else "email",
         )

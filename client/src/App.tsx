@@ -1,28 +1,69 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError } from './types';
 import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, checkPaypalStatus } from './api';
-import { Header } from './components/Header';
+import { Boot } from './components/Boot';
+import { GooFilter } from './components/LiquidBlobs';
+import { Nav } from './components/Nav';
+import { Hero } from './components/Hero';
+import { Torn } from './components/Torn';
 import { PipelineFlow } from './components/PipelineFlow';
 import { InvoiceGrid } from './components/InvoiceGrid';
 import { InvoiceSelector } from './components/InvoiceSelector';
 import { ApprovalGate } from './components/ApprovalGate';
-import { AmbientBackground } from './components/AmbientBackground';
-import { InteractionLayer } from './components/InteractionLayer';
-import { KineticHero } from './components/KineticHero';
 import { AddInvoiceForm } from './components/AddInvoiceForm';
-import { AlertTriangle, Terminal, X } from 'lucide-react';
+import { useInView } from './useInView';
+import { X } from 'lucide-react';
+
+type Tone = 'acid' | 'ink' | 'bone';
+
+/** A full-bleed colour field that reveals its contents once, on first sight. */
+const Field: React.FC<{
+  id: string;
+  tone: Tone;
+  marker: string;
+  statement: string;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ id, tone, marker, statement, aside, children }) => {
+  const [ref, inView] = useInView<HTMLElement>();
+  return (
+    <section
+      ref={ref}
+      id={id}
+      data-field={tone}
+      className={`field field--${tone}${inView ? ' is-in' : ''}`}
+    >
+      <div className="wrap">
+        <header
+          style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
+            gap: 'clamp(18px, 3vw, 40px)', flexWrap: 'wrap',
+            marginBottom: 'clamp(32px, 5vw, 64px)',
+          }}
+        >
+          <div>
+            <span className="marker fade" style={{ marginBottom: 18, display: 'inline-flex' }}>{marker}</span>
+            <h2 className="statement rise rise--1"><span>{statement}</span></h2>
+          </div>
+          {aside && <div className="fade">{aside}</div>}
+        </header>
+        <div className="fade">{children}</div>
+      </div>
+    </section>
+  );
+};
 
 export const App: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [sweepResult, setSweepResult] = useState<SweepResult | null>(null);
   const [approveResult, setApproveResult] = useState<ApproveResult | null>(null);
-  const [isSweeping, setIsSweeping] = useState<boolean>(false);
-  const [isApproving, setIsApproving] = useState<boolean>(false);
+  const [isSweeping, setIsSweeping] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  const [showAddInvoice, setShowAddInvoice] = useState<boolean>(false);
-  const [isMarkingPaid, setIsMarkingPaid] = useState<boolean>(false);
-  const [paypalConfigured, setPaypalConfigured] = useState<boolean>(false);
+  const [showAddInvoice, setShowAddInvoice] = useState(false);
+  const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+  const [paypalConfigured, setPaypalConfigured] = useState(false);
 
   useEffect(() => {
     checkPaypalStatus()
@@ -30,30 +71,24 @@ export const App: React.FC = () => {
       .catch(() => setPaypalConfigured(false));
   }, []);
 
-  // Load sample invoices from server
   const loadInvoices = useCallback(async () => {
     try {
       setError(null);
       const data = await fetchInvoices();
       setInvoices(data);
-      if (data.length > 0 && !selectedInvoice) {
-        setSelectedInvoice(data[0]);
-      }
+      setSelectedInvoice((cur) => cur ?? (data.length ? data[0] : null));
     } catch (err: any) {
       console.error('Failed to fetch invoices:', err);
       setError({
-        error: err.error || 'Server Connectivity Failure',
-        details: err.details || 'Ensure the Express server in /server is running on port 3001.',
+        error: err.error || 'Can’t reach the server',
+        details: err.details || 'The API didn’t respond. Check the server is running on port 3001.',
         stderr: err.stderr || null,
       });
     }
-  }, [selectedInvoice]);
+  }, []);
 
-  useEffect(() => {
-    loadInvoices();
-  }, [loadInvoices]);
+  useEffect(() => { loadInvoices(); }, [loadInvoices]);
 
-  // Handle invoice selection
   const handleSelectInvoice = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setSweepResult(null);
@@ -61,7 +96,6 @@ export const App: React.FC = () => {
     setError(null);
   };
 
-  // Run agent sweep
   const handleRunSweep = async (inv: Invoice) => {
     try {
       setIsSweeping(true);
@@ -69,11 +103,12 @@ export const App: React.FC = () => {
       setApproveResult(null);
       const result = await runSweep(inv);
       setSweepResult(result);
+      document.getElementById('decision')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err: any) {
       console.error('Sweep execution failed:', err);
       setError({
-        error: err.error || 'Agent Sweep Execution Error',
-        details: err.details || err.message || 'The Gemini provider may have encountered a rate limit or timeout. State preserved.',
+        error: err.error || 'The agent didn’t finish',
+        details: err.details || err.message || 'The model may have hit a rate limit. Nothing was lost — try again.',
         stderr: err.stderr || null,
         status: err.status,
       });
@@ -82,23 +117,21 @@ export const App: React.FC = () => {
     }
   };
 
-  // Handle human approval decision
   const handleApprove = async (draft: DraftedMessage, editedBody?: string) => {
     try {
       setIsApproving(true);
       setError(null);
       const outcome = await approveAndExecute({
-        draft,
-        approved: true,
-        edited_body: editedBody,
+        draft, approved: true, edited_body: editedBody,
         client_name: selectedInvoice?.client_name,
         invoice: selectedInvoice || undefined,
       });
       setApproveResult(outcome);
+      await loadInvoices();
     } catch (err: any) {
       console.error('Approval failed:', err);
       setError({
-        error: err.error || 'Approval Execution Failure',
+        error: err.error || 'Couldn’t send that',
         details: err.details || err.message,
         stderr: err.stderr || null,
         status: err.status,
@@ -108,14 +141,12 @@ export const App: React.FC = () => {
     }
   };
 
-  // Handle human rejection decision
   const handleReject = async (draft: DraftedMessage) => {
     try {
       setIsApproving(true);
       setError(null);
       const outcome = await approveAndExecute({
-        draft,
-        approved: false,
+        draft, approved: false,
         client_name: selectedInvoice?.client_name,
         invoice: selectedInvoice || undefined,
       });
@@ -123,7 +154,7 @@ export const App: React.FC = () => {
     } catch (err: any) {
       console.error('Rejection failed:', err);
       setError({
-        error: err.error || 'Rejection Processing Failure',
+        error: err.error || 'Couldn’t record that',
         details: err.details || err.message,
         stderr: err.stderr || null,
         status: err.status,
@@ -149,9 +180,7 @@ export const App: React.FC = () => {
     setIsMarkingPaid(true);
     try {
       await markInvoicePaid(invoice.invoice_id);
-      // Reflect the paid state immediately in the selected invoice, rather
-      // than waiting on a full refetch, so the UI updates without a flicker.
-      setSelectedInvoice({ ...invoice, status: 'paid' });
+      setSelectedInvoice({ ...invoice, status: 'paid', paid_via: 'manual' });
       await loadInvoices();
     } catch (err) {
       console.error('Failed to mark invoice paid:', err);
@@ -161,134 +190,133 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="app-shell">
-      <AmbientBackground />
-      <InteractionLayer />
-      <Header onRefresh={loadInvoices} isLoading={isSweeping || isApproving} />
+    <>
+      <Boot />
+      <GooFilter />
+      <Nav />
 
-      <KineticHero />
+      <main>
+        <Hero />
 
-      <main className="dashboard-container">
-        {/* Calm On-Brand Error Banner (Rate limits / Timeouts) */}
-        {error && (
-          <div
-            className="ledger-panel ledger-panel-glow-critical"
-            style={{
-              padding: '18px 24px',
-              borderLeft: '4px solid var(--critical)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--critical)', fontWeight: 700 }}>
-                <AlertTriangle size={18} />
-                <span className="display-title" style={{ fontSize: '1rem', color: '#F1F5F9' }}>
-                  {error.error}
-                </span>
-              </div>
-              <button
-                onClick={() => setError(null)}
-                className="btn btn-neutral"
-                style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: 'var(--text-muted)' }}
-              >
-                <X size={16} />
-              </button>
-            </div>
+        <Torn from="acid" to="ink" variant={0} />
+        <Field
+          id="agent"
+          tone="ink"
+          marker="How it thinks"
+          statement="It weighs the money and the odds before it writes a word"
+        >
+          <PipelineFlow
+            sweepResult={sweepResult}
+            approveResult={approveResult}
+            isSweeping={isSweeping}
+            isApproving={isApproving}
+            error={error}
+            onRetry={selectedInvoice ? () => handleRunSweep(selectedInvoice) : undefined}
+          />
+        </Field>
 
-            {error.details && (
-              <p style={{ fontFamily: 'var(--font-sans)', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
-                {error.details}
-              </p>
-            )}
-
-            {error.stderr && (
-              <div style={{ marginTop: '8px' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '0.72rem',
-                    color: 'var(--critical)',
-                    marginBottom: '4px',
-                  }}
-                >
-                  <Terminal size={12} /> Captured Diagnostic Output:
-                </div>
-                <pre
-                  style={{
-                    background: 'var(--surface-inset)',
-                    color: '#FF809B',
-                    padding: '12px 14px',
-                    borderRadius: '4px',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '0.76rem',
-                    overflowX: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    maxHeight: '180px',
-                    border: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  {error.stderr}
-                </pre>
-              </div>
-            )}
+        <Torn from="ink" to="acid" variant={1} />
+        <Field
+          id="ledger"
+          tone="acid"
+          marker="The ledger"
+          statement="Every account it’s watching"
+          aside={
+            <span className={`tag${paypalConfigured ? ' tag--paid' : ''}`} style={!paypalConfigured ? { opacity: 0.5 } : undefined}>
+              <span className={paypalConfigured ? 'dot dot--live' : 'dot'} />
+              {paypalConfigured ? 'PayPal sandbox live' : 'PayPal not configured'}
+            </span>
+          }
+        >
+          <InvoiceGrid
+            invoices={invoices}
+            selectedInvoiceId={selectedInvoice?.invoice_id}
+            onSelectInvoice={handleSelectInvoice}
+          />
+          <div style={{ marginTop: 'clamp(40px, 6vw, 78px)' }}>
+            <InvoiceSelector
+              invoices={invoices}
+              selectedInvoice={selectedInvoice}
+              onSelectInvoice={handleSelectInvoice}
+              onRunSweep={handleRunSweep}
+              isSweeping={isSweeping}
+              onAddInvoice={() => setShowAddInvoice(true)}
+              onMarkPaid={handleMarkPaid}
+              isMarkingPaid={isMarkingPaid}
+            />
           </div>
-        )}
+        </Field>
 
-        {/* Live Strands Graph Pipeline (2D, 60fps, full-width Hero) */}
-        <div className="reveal d1">
-        <PipelineFlow
-          sweepResult={sweepResult}
-          approveResult={approveResult}
-          isSweeping={isSweeping}
-          isApproving={isApproving}
-          error={error}
-          onRetry={selectedInvoice ? () => handleRunSweep(selectedInvoice) : undefined}
-        />
-        </div>
+        <Torn from="acid" to="bone" variant={2} />
+        <Field
+          id="decision"
+          tone="bone"
+          marker="Your call"
+          statement="Nothing goes out until you say so"
+        >
+          <ApprovalGate
+            sweepResult={sweepResult}
+            approveResult={approveResult}
+            isApproving={isApproving}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onReset={handleReset}
+          />
+        </Field>
 
-        {/* Portfolio-wide AG Grid table — sortable/filterable overview of
-            every invoice, showing live PayPal-closed vs manually-closed
-            status at a glance; clicking a row drives the same selection
-            state as the chip tape below. */}
-        <InvoiceGrid
-          invoices={invoices}
-          selectedInvoiceId={selectedInvoice?.invoice_id}
-          onSelectInvoice={handleSelectInvoice}
-          paypalConfigured={paypalConfigured}
-        />
-
-        {/* Invoice Surveillance Selector (Single-column Stacked) */}
-        <InvoiceSelector
-          invoices={invoices}
-          selectedInvoice={selectedInvoice}
-          onSelectInvoice={handleSelectInvoice}
-          onRunSweep={handleRunSweep}
-          isSweeping={isSweeping}
-          onAddInvoice={() => setShowAddInvoice(true)}
-          onMarkPaid={handleMarkPaid}
-          isMarkingPaid={isMarkingPaid}
-        />
-
-        {/* Human-in-the-Loop Approval Gate (Single-column Stacked) */}
-        <ApprovalGate
-          sweepResult={sweepResult}
-          approveResult={approveResult}
-          isApproving={isApproving}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onReset={handleReset}
-        />
+        <Torn from="bone" to="ink" variant={0} />
+        <footer className="field field--ink field--tight" data-field="ink">
+          <div className="wrap">
+            <h2 className="mega" style={{ marginBottom: 'clamp(28px, 4vw, 56px)' }}>Get paid.</h2>
+            <dl className="readouts">
+              <div className="readout">
+                <dt>Payments</dt>
+                <dd style={{ fontSize: '1rem', fontFamily: 'var(--display)', fontWeight: 700 }}>PayPal Orders v2 + webhooks</dd>
+              </div>
+              <div className="readout">
+                <dt>Reasoning</dt>
+                <dd style={{ fontSize: '1rem', fontFamily: 'var(--display)', fontWeight: 700 }}>Strands multi-agent graph</dd>
+              </div>
+              <div className="readout">
+                <dt>Model</dt>
+                <dd style={{ fontSize: '1rem', fontFamily: 'var(--display)', fontWeight: 700 }}>Gemini</dd>
+              </div>
+            </dl>
+          </div>
+        </footer>
       </main>
+
+      {/* Errors sit above everything, out of the reading flow. */}
+      {error && (
+        <div
+          role="alert"
+          style={{
+            position: 'fixed', left: 'var(--gutter)', bottom: 'var(--gutter)', zIndex: 200,
+            maxWidth: 'min(460px, calc(100vw - var(--gutter) * 2))',
+            background: 'var(--blood)', color: '#fff',
+            border: '2px solid #fff', padding: '18px 20px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start' }}>
+            <strong style={{ fontSize: '1rem', letterSpacing: '-0.02em' }}>{error.error}</strong>
+            <button
+              onClick={() => setError(null)}
+              aria-label="Dismiss"
+              style={{ background: 'none', border: 0, color: '#fff', cursor: 'pointer', padding: 2, flex: 'none' }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          {error.details && (
+            <p className="body body--sm" style={{ marginTop: 8 }}>{error.details}</p>
+          )}
+        </div>
+      )}
 
       {showAddInvoice && (
         <AddInvoiceForm onClose={() => setShowAddInvoice(false)} onCreated={handleInvoiceCreated} />
       )}
-    </div>
+    </>
   );
 };
 

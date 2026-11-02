@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { SweepResult, ApproveResult, ApiError } from '../types';
-import { Zap, AlertTriangle, RefreshCw, ShieldAlert } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 interface PipelineFlowProps {
   sweepResult: SweepResult | null;
@@ -15,16 +15,24 @@ type NodeStatus = 'idle' | 'active' | 'done' | 'skipped' | 'error';
 
 interface NodeDef { id: string; name: string; sub: string; x: number; }
 
+/** Mirrors the real strands Graph in agent/graph.py: risk and probability are
+ *  parallel entry points, they fan into plan, plan conditionally reaches draft,
+ *  and reflection runs after the human decides. */
 const NODES: NodeDef[] = [
-  { id: 'risk',        name: 'Risk Assess',   sub: 'calculate_risk_score' },
-  { id: 'probability',  name: 'Probability',   sub: 'predict_payment_probability' },
-  { id: 'plan',         name: 'Plan Strategy', sub: 'fan-in · conditional' },
-  { id: 'draft',        name: 'Draft Message', sub: 'tone-matched outreach' },
-  { id: 'reflect',      name: 'Reflection',    sub: 'phase 2 · post-gate' },
-].map((n, i) => ({ ...n, x: [10, 10, 38, 66, 90][i] }));
+  { id: 'risk',        name: 'Score the risk',  sub: 'how much is at stake' },
+  { id: 'probability', name: 'Predict payment', sub: 'will they pay anyway' },
+  { id: 'plan',        name: 'Decide',          sub: 'chase, or leave it' },
+  { id: 'draft',       name: 'Write it',        sub: 'tone matched to history' },
+  { id: 'reflect',     name: 'Learn',           sub: 'after your decision' },
+  // x sits each node directly above its own readout column below.
+].map((n, i) => ({ ...n, x: [10, 30, 50, 70, 90][i] }));
 
-/** Pure 2D, SVG + CSS animated pipeline — no WebGL, reliable 60fps, and a true
- *  visualization of the real strands multiagent Graph topology + live state. */
+const ACID = '#FFE500';
+const MINT = '#00B85F';
+const BLOOD = '#FF2D1F';
+const DIM = 'rgba(255,229,0,0.26)';
+const MUTED = 'rgba(255,229,0,0.5)';
+
 export const PipelineFlow: React.FC<PipelineFlowProps> = ({
   sweepResult, approveResult, isSweeping, isApproving, error, onRetry,
 }) => {
@@ -44,52 +52,54 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
   }, [sweepResult, approveResult, isSweeping, isApproving, error]);
 
   const colorFor = (status: NodeStatus, nodeId: string): string => {
-    if (status === 'error') return 'var(--critical)';
-    if (status === 'active') return 'var(--gold)';
-    if (status === 'skipped') return 'var(--text-muted)';
+    if (status === 'error') return BLOOD;
+    if (status === 'active') return ACID;
+    if (status === 'skipped') return MUTED;
     if (status === 'done' && sweepResult) {
-      // Risk Assess reflects its own finding directly.
       if (nodeId === 'risk') {
-        if (sweepResult.risk.category === 'Critical') return 'var(--critical)';
-        if (sweepResult.risk.category === 'High') return 'var(--warning)';
-        return 'var(--healthy)';
+        if (sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High') return BLOOD;
+        return MINT;
       }
-      // Probability reflects its own number: low probability is itself a bad signal.
       if (nodeId === 'probability') {
-        if (sweepResult.probability.probability < 30) return 'var(--critical)';
-        if (sweepResult.probability.probability < 60) return 'var(--warning)';
-        return 'var(--healthy)';
+        return sweepResult.probability.probability < 50 ? BLOOD : MINT;
       }
       if (nodeId === 'plan') {
-        return sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High'
-          ? 'var(--critical)' : 'var(--healthy)';
+        return sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High' ? BLOOD : MINT;
       }
-      if (nodeId === 'draft' && sweepResult.plan.tone === 'urgent') return 'var(--critical)';
-      return 'var(--healthy)';
+      if (nodeId === 'draft' && sweepResult.plan.tone === 'urgent') return BLOOD;
+      return MINT;
     }
-    return 'var(--border-active)';
+    return DIM;
   };
 
-  const subtitleFor = (id: string, status: NodeStatus): string => {
-    if (status === 'error') return 'ERROR';
-    if (id === 'risk' && status === 'done' && sweepResult) return `${sweepResult.risk.category.toUpperCase()} (${sweepResult.risk.score}/100)`;
-    if (id === 'probability' && status === 'done' && sweepResult) return `${sweepResult.probability.probability}% LIKELY`;
-    if (id === 'plan' && status === 'done' && sweepResult) return `BRANCH: ${sweepResult.plan.branch.toUpperCase()}`;
+  /** Each node reports its own finding once it has one. */
+  const readingFor = (id: string, status: NodeStatus): string => {
+    if (status === 'error') return 'Failed';
+    if (id === 'risk' && status === 'done' && sweepResult) return `${sweepResult.risk.category}, ${sweepResult.risk.score}/100`;
+    if (id === 'probability' && status === 'done' && sweepResult) return `${sweepResult.probability.probability}% likely to pay`;
+    if (id === 'plan' && status === 'done' && sweepResult) {
+      return sweepResult.plan.branch === 'no_action' ? 'Leave it alone' : `Chase by ${sweepResult.plan.channel}`;
+    }
     if (id === 'draft') {
-      if (status === 'skipped') return 'NO ACTION — SUPPRESSED';
-      if (status === 'done' && sweepResult?.draft) return `${sweepResult.draft.channel.toUpperCase()} · ${sweepResult.plan.tone.toUpperCase()}`;
+      if (status === 'skipped') return 'Nothing sent';
+      if (status === 'done' && sweepResult?.draft) {
+        const tone = sweepResult.plan.tone;
+        return `${tone.charAt(0).toUpperCase()}${tone.slice(1)} ${sweepResult.draft.channel}`;
+      }
     }
     if (id === 'reflect') {
-      if (status === 'done') return 'LOGGED TO MEMORY';
-      if (status === 'skipped') return 'REJECTED — NO REFLECTION';
+      if (status === 'done') return 'Saved to memory';
+      if (status === 'skipped') return 'No lesson logged';
     }
-    if (status === 'active') return 'PROCESSING…';
-    return NODES.find(n => n.id === id)?.sub.toUpperCase() || 'STANDBY';
+    if (status === 'active') return 'Working…';
+    return NODES.find((n) => n.id === id)?.sub ?? 'Waiting';
   };
 
   const edgePairs: [string, string][] = [['risk', 'plan'], ['probability', 'plan'], ['plan', 'draft'], ['draft', 'reflect']];
-  const nodeX = (id: string) => NODES.find(n => n.id === id)!.x;
-  const nodeY = (id: string) => (id === 'risk' ? 28 : id === 'probability' ? 72 : 50);
+  const nodeX = (id: string) => NODES.find((n) => n.id === id)!.x;
+  // Risk and probability are parallel entry points, so they share the top row
+  // and fan down into plan.
+  const nodeY = (id: string) => (id === 'risk' || id === 'probability' ? 6 : 19);
 
   const edgeState = (_from: string, to: string): 'live' | 'done' | 'skipped' | 'idle' => {
     const sTo = statuses[to];
@@ -100,115 +110,92 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
     return 'idle';
   };
 
-  return (
-    <section className="ledger-panel reveal d1" style={{ padding: '26px 28px 30px', position: 'relative', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="mono-label" style={{ fontSize: '0.72rem' }}>STRANDS MULTI-AGENT GRAPH TOPOLOGY</span>
-            <span className={`badge ${error ? 'badge-critical' : isSweeping ? 'badge-gold' : 'badge-healthy'}`}>
-              {error ? <AlertTriangle size={11} /> : <Zap size={11} />}
-              {error ? 'FAULT' : isSweeping ? 'LIVE REASONING PULSE' : sweepResult ? 'SWEEP COMPILED' : 'TOPOLOGY READY'}
-            </span>
-          </div>
-          <div className="mono-value" style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 6 }}>
-            graph.py: Parallel Entry (Risk + Probability) → Plan Strategy → Conditional Edge → Draft → Reflect
-          </div>
-        </div>
+  if (error) {
+    return (
+      <div className="slab" style={{ borderColor: BLOOD, color: BLOOD }}>
+        <h3 className="title" style={{ marginBottom: 10 }}>The agent didn’t answer</h3>
+        <p className="body" style={{ color: ACID, opacity: 0.8, marginBottom: 20 }}>
+          {error.details || error.error || 'The reasoning engine timed out. Free-tier rate limits do this.'}
+        </p>
+        {onRetry && (
+          <button className="pill" onClick={onRetry} style={{ ['--pill-fg' as string]: BLOOD, ['--pill-inv' as string]: '#fff' }}>
+            <RefreshCw size={14} /> Try again
+          </button>
+        )}
       </div>
+    );
+  }
 
-      {error ? (
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 14, padding: '52px 20px', borderRadius: 12,
-          background: 'rgba(255,59,107,0.05)', border: '1px solid rgba(255,59,107,0.25)',
-        }}>
-          <ShieldAlert size={30} color="var(--critical)" />
-          <div style={{ textAlign: 'center' }}>
-            <div className="display-title" style={{ fontSize: '1.05rem', color: 'var(--critical)' }}>Agent Temporarily Unavailable</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 6, maxWidth: 440 }}>
-              {error.details || error.error || 'The reasoning engine did not respond in time. This can happen on free-tier rate limits.'}
+  return (
+    <div>
+      <svg
+        viewBox="0 0 100 26"
+        preserveAspectRatio="xMidYMid meet"
+        style={{ width: '100%', height: 'auto', display: 'block' }}
+        aria-label="Agent reasoning graph"
+      >
+        {edgePairs.map(([from, to]) => {
+          const state = edgeState(from, to);
+          const x1 = nodeX(from), y1 = nodeY(from), x2 = nodeX(to), y2 = nodeY(to);
+          const stroke = state === 'live' ? ACID : state === 'done' ? MINT : state === 'skipped' ? MUTED : DIM;
+          return (
+            <g key={`${from}-${to}`}>
+              <line
+                x1={x1} y1={y1} x2={x2} y2={y2}
+                stroke={stroke}
+                strokeWidth={state === 'idle' ? 0.22 : 0.4}
+                strokeDasharray={state === 'skipped' ? '1.2 1.2' : undefined}
+              />
+              {state === 'live' && (
+                <circle r="0.8" fill={ACID}>
+                  <animateMotion dur="1.05s" repeatCount="indefinite" path={`M ${x1} ${y1} L ${x2} ${y2}`} />
+                </circle>
+              )}
+            </g>
+          );
+        })}
+
+        {NODES.map((n) => {
+          const status = statuses[n.id];
+          const color = colorFor(status, n.id);
+          const y = nodeY(n.id);
+          const active = status === 'active';
+          return (
+            <g key={n.id} transform={`translate(${n.x}, ${y})`}>
+              {active && <circle r="1.8" fill="none" stroke={color} strokeWidth="0.3" className="pf-ring" />}
+              <circle r="1.35" fill={status === 'idle' ? 'none' : color} stroke={color} strokeWidth="0.4" />
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="readouts" style={{ marginTop: 'clamp(20px, 3vw, 34px)' }}>
+        {NODES.map((n) => {
+          const status = statuses[n.id];
+          const color = colorFor(status, n.id);
+          return (
+            <div className="readout" key={n.id}>
+              <dt style={{ opacity: 1, color: status === 'idle' ? MUTED : color }}>
+                {status === 'active' && <span className="dot dot--live" style={{ display: 'inline-block', marginRight: 7 }} />}
+                {n.name}
+              </dt>
+              <dd
+                style={{
+                  fontFamily: 'var(--display)',
+                  fontWeight: 600,
+                  letterSpacing: '-0.015em',
+                  fontSize: 'clamp(0.85rem, 1.15vw, 1.02rem)',
+                  lineHeight: 1.28,
+                  color: status === 'idle' ? MUTED : color,
+                }}
+              >
+                {readingFor(n.id, status)}
+              </dd>
             </div>
-          </div>
-          {onRetry && (
-            <button className="btn btn-neutral" onClick={onRetry} style={{ marginTop: 4 }}>
-              <RefreshCw size={14} /> Retry Sweep
-            </button>
-          )}
-        </div>
-      ) : (
-        <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: 'clamp(260px, 34vw, 380px)' }}>
-          <defs>
-            <filter id="pf-glow" x="-60%" y="-60%" width="220%" height="220%">
-              <feGaussianBlur stdDeviation="1.6" result="blur" />
-              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
-          </defs>
-
-          {/* edges */}
-          {edgePairs.map(([from, to]) => {
-            const state = edgeState(from, to);
-            const x1 = nodeX(from), y1 = nodeY(from), x2 = nodeX(to), y2 = nodeY(to);
-            const stroke = state === 'live' ? 'var(--gold)' : state === 'done' ? 'var(--healthy)' : state === 'skipped' ? 'var(--text-muted)' : 'var(--border-subtle)';
-            return (
-              <g key={`${from}-${to}`}>
-                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke}
-                  strokeWidth={state === 'idle' ? 0.35 : 0.6}
-                  strokeDasharray={state === 'skipped' ? '2 2' : undefined}
-                  opacity={state === 'idle' ? 0.35 : 0.85} />
-                {state === 'live' && (
-                  <circle r="1.1" fill="var(--gold)" filter="url(#pf-glow)">
-                    <animateMotion dur="1.1s" repeatCount="indefinite"
-                      path={`M ${x1} ${y1} L ${x2} ${y2}`} />
-                  </circle>
-                )}
-              </g>
-            );
-          })}
-
-          {/* nodes */}
-          {NODES.map((n) => {
-            const status = statuses[n.id];
-            const color = colorFor(status, n.id);
-            const y = nodeY(n.id);
-            const active = status === 'active';
-            return (
-              <g key={n.id} transform={`translate(${n.x}, ${y})`}>
-                <circle r={active ? 3.6 : 3} fill="none" stroke={color} strokeWidth="0.5"
-                  opacity={status === 'idle' ? 0.4 : 0.9} filter={status !== 'idle' ? 'url(#pf-glow)' : undefined}
-                  className={active ? 'pf-pulse-ring' : undefined} />
-                <circle r={active ? 2.1 : 1.7} fill={color} opacity={status === 'idle' ? 0.5 : 1}
-                  className={active ? 'pf-node-breathe' : undefined} />
-              </g>
-            );
-          })}
-        </svg>
-      )}
-
-      {!error && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 8 }}>
-          {NODES.map((n) => {
-            const status = statuses[n.id];
-            const color = colorFor(status, n.id);
-            return (
-              <div key={n.id} style={{
-                padding: '10px 12px', borderRadius: 8,
-                border: `1px solid ${status === 'idle' ? 'var(--border-subtle)' : color}`,
-                background: status === 'idle' ? 'rgba(11,15,25,0.4)' : `${color}14`,
-                transition: 'all 0.3s ease',
-              }}>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.82rem', color: status === 'idle' ? 'var(--text-secondary)' : color }}>
-                  {n.name}
-                </div>
-                <div className="mono-value" style={{ fontSize: '0.66rem', color: 'var(--text-muted)', marginTop: 3, letterSpacing: '0.04em' }}>
-                  {subtitleFor(n.id, status)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
+          );
+        })}
+      </div>
+    </div>
   );
 };
 

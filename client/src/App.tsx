@@ -7,6 +7,7 @@ import { Nav } from './components/Nav';
 import { Hero } from './components/Hero';
 import { Torn } from './components/Torn';
 import { PipelineFlow } from './components/PipelineFlow';
+import { PipelineRail } from './components/PipelineRail';
 import { InvoiceGrid } from './components/InvoiceGrid';
 import { InvoiceSelector } from './components/InvoiceSelector';
 import { ApprovalGate } from './components/ApprovalGate';
@@ -14,7 +15,7 @@ import { AddInvoiceForm } from './components/AddInvoiceForm';
 import { useInView } from './useInView';
 import { X } from 'lucide-react';
 
-type Tone = 'acid' | 'ink' | 'pink';
+type Tone = 'mint' | 'ink' | 'coral';
 
 /** A full-bleed colour field that reveals its contents once, on first sight. */
 const Field: React.FC<{
@@ -101,9 +102,14 @@ export const App: React.FC = () => {
       setIsSweeping(true);
       setError(null);
       setApproveResult(null);
+      /* Go to the reasoning, now, before the work starts — the whole point of
+         pressing this is to watch it think. This used to jump to the finished
+         draft instead, once the run was over, which meant the graph animated
+         through its entire sequence on a part of the page nobody was looking
+         at. The rail at the bottom carries the state from here on. */
+      document.getElementById('agent')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       const result = await runSweep(inv);
       setSweepResult(result);
-      document.getElementById('decision')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err: any) {
       console.error('Sweep execution failed:', err);
       setError({
@@ -198,7 +204,7 @@ export const App: React.FC = () => {
       <main>
         <Hero />
 
-        <Torn from="acid" to="ink" variant={0} />
+        <Torn from="mint" to="ink" variant={0} />
         <Field
           id="agent"
           tone="ink"
@@ -215,10 +221,10 @@ export const App: React.FC = () => {
           />
         </Field>
 
-        <Torn from="ink" to="acid" variant={1} />
+        <Torn from="ink" to="mint" variant={1} />
         <Field
           id="ledger"
-          tone="acid"
+          tone="mint"
           marker="The ledger"
           statement="Every account it’s watching"
           aside={
@@ -247,10 +253,10 @@ export const App: React.FC = () => {
           </div>
         </Field>
 
-        <Torn from="acid" to="pink" variant={2} />
+        <Torn from="mint" to="coral" variant={2} />
         <Field
           id="decision"
-          tone="pink"
+          tone="coral"
           marker="Your call"
           statement="Nothing goes out until you say so"
         >
@@ -264,7 +270,7 @@ export const App: React.FC = () => {
           />
         </Field>
 
-        <Torn from="pink" to="ink" variant={0} />
+        <Torn from="coral" to="ink" variant={0} />
         <footer className="field field--ink field--tight" data-field="ink">
           <div className="wrap">
             <h2 className="mega" style={{ marginBottom: 'clamp(28px, 4vw, 56px)' }}>Get paid.</h2>
@@ -293,7 +299,7 @@ export const App: React.FC = () => {
           style={{
             position: 'fixed', left: 'var(--gutter)', bottom: 'var(--gutter)', zIndex: 200,
             maxWidth: 'min(460px, calc(100vw - var(--gutter) * 2))',
-            background: 'var(--pink)', color: 'var(--ink)',
+            background: 'var(--coral)', color: 'var(--ink)',
             border: '2px solid #fff', padding: '18px 20px',
           }}
         >
@@ -312,6 +318,15 @@ export const App: React.FC = () => {
           )}
         </div>
       )}
+
+      <PipelineRail
+        sweepResult={sweepResult}
+        approveResult={approveResult}
+        isSweeping={isSweeping}
+        isApproving={isApproving}
+        error={error}
+        nudged={!!error}
+      />
 
       {showAddInvoice && (
         <AddInvoiceForm onClose={() => setShowAddInvoice(false)} onCreated={handleInvoiceCreated} />

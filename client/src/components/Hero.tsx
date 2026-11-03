@@ -13,7 +13,7 @@ const go = (id: string) => (e: React.MouseEvent) => {
 };
 
 export const Hero: React.FC = () => (
-  <section className="field field--acid hero" data-field="acid" id="top">
+  <section className="field field--mint hero" data-field="mint" id="top">
     <div className="wrap hero-inner">
       <h1 className="mega hero-head">
         <span className="hero-line"><span>Your invoices</span></span>

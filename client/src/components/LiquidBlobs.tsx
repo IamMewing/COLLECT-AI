@@ -5,8 +5,8 @@ import { W as VB_W, H as VB_H, GLSL_WAVE, waveRegistry } from './tornWave';
  * The signature move: a liquid mass of ink that trails the pointer across the
  * whole document and knocks out whatever it passes over.
  *
- *   yellow mass over the acid field -> black   (ink spreading)
- *   yellow mass over black type     -> yellow  (type knocks out)
+ *   mint mass over the mint field -> black  (ink spreading)
+ *   mint mass over black type     -> mint   (type knocks out)
  *
  * via `mix-blend-mode: difference`, so one layer inverts correctly over every
  * colour field with no per-section configuration.
@@ -96,15 +96,15 @@ const IDLE_AFTER = 110;
 
 /** What the mass is filled with over each field, chosen so that differencing
  *  it against that field lands on the right colour:
- *    tonic field - filled tonic -> black   (ink spreading over tonic)
- *    pink  field - filled pink  -> black   (ink spreading over pink)
- *    ink   field - filled tonic -> tonic
+ *    mint  field - filled mint  -> black   (ink spreading over mint)
+ *    coral field - filled coral -> black   (ink spreading over coral)
+ *    ink   field - filled mint  -> mint
  *  Filling with one colour everywhere, which is what this did, differences
  *  against the other fields to colours that are in no part of the palette. */
 const FILL: Record<string, [number, number, number]> = {
-  acid: [0.851, 0.984, 0.373], // tonic #D9FB5F
-  pink: [1.0, 0.482, 0.710], //  #FF7BB5
-  ink: [0.851, 0.984, 0.373],
+  mint: [0.16863, 0.89020, 0.54118], // #2BE38A
+  coral: [1.0, 0.41961, 0.30196], //    #FF6B4D
+  ink: [0.16863, 0.89020, 0.54118], //  mint, so the mass reads mint on black
 };
 /* Must cover what a fully-extended frame actually asks for, with headroom.
    Undersized by even a few pixels, fitBox clamps to it and the mass gets cut
@@ -170,7 +170,8 @@ void main() {
   }
   // Stepped, not blended. Both fills difference to the same colour over their
   // own field, so a hard handover is invisible — whereas blending between them
-  // puts a 1px line of the mixture, which between acid and bone is blue.
+  // puts a 1px line of the mixture, which is a colour from no part of this
+  // palette — a grey-green between mint and coral.
   vec3 col = mix(u_colA, u_colB, step(split, p.y));
 
   // Premultiplied, to match the context and the ONE / ONE_MINUS_SRC_ALPHA
@@ -353,7 +354,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       to: string;
     };
     let bands: Band[] = [];
-    let baseTone = 'acid';
+    let baseTone = 'mint';
 
     const readGeometry = () => {
       geomDirty = false;
@@ -366,13 +367,13 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
             top: r.top,
             height: r.height,
             width: r.width,
-            from: el.dataset.from || 'acid',
-            to: el.dataset.to || 'acid',
+            from: el.dataset.from || 'mint',
+            to: el.dataset.to || 'mint',
           };
         })
         .sort((a, b) => a.top - b.top);
       const first = document.querySelector<HTMLElement>('[data-field]');
-      baseTone = first?.dataset.field || 'acid';
+      baseTone = first?.dataset.field || 'mint';
     };
 
     /** The two fills in play around a given height, and the divider to split
@@ -394,13 +395,13 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       if (near) {
         const wave = waveRegistry.get(near.el);
         return {
-          a: FILL[near.from] || FILL.acid,
-          b: FILL[near.to] || FILL.acid,
+          a: FILL[near.from] || FILL.mint,
+          b: FILL[near.to] || FILL.mint,
           band: near,
           wave,
         };
       }
-      const f = FILL[tone] || FILL.acid;
+      const f = FILL[tone] || FILL.mint;
       return { a: f, b: f, band: null, wave: undefined };
     };
 

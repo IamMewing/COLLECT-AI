@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { SweepResult, ApproveResult, ApiError } from '../types';
 import { RefreshCw } from 'lucide-react';
 import { useInView } from '../useInView';
+import type { NodeStatus } from './pipelineModel';
+import { NODES, EDGES, BASE, computeStatuses } from './pipelineModel';
 
 interface PipelineFlowProps {
   sweepResult: SweepResult | null;
@@ -12,38 +14,10 @@ interface PipelineFlowProps {
   onRetry?: () => void;
 }
 
-type NodeStatus = 'idle' | 'active' | 'done' | 'skipped' | 'error';
-
-interface NodeDef { id: string; name: string; sub: string; x: number; y: number; }
-
-/** Rows and the baseline the whole panel is measured against. */
-const TOP_ROW = 5;
-const BOTTOM_ROW = 20;
-const BASE = 24.4;
-
-/** Mirrors the real strands Graph in agent/graph.py: risk and probability are
- *  parallel entry points, they fan into plan, plan conditionally reaches draft,
- *  and reflection runs after the human decides.
- *  x sits each node directly above its own readout column below. */
-const NODES: NodeDef[] = [
-  { id: 'risk',        name: 'Score the risk',  sub: 'how much is at stake',   x: 10, y: TOP_ROW },
-  { id: 'probability', name: 'Predict payment', sub: 'will they pay anyway',   x: 30, y: TOP_ROW },
-  { id: 'plan',        name: 'Decide',          sub: 'chase, or leave it',     x: 50, y: BOTTOM_ROW },
-  { id: 'draft',       name: 'Write it',        sub: 'tone matched to history', x: 70, y: BOTTOM_ROW },
-  { id: 'reflect',     name: 'Learn',           sub: 'after your decision',    x: 90, y: BOTTOM_ROW },
-];
-
-const EDGES: [string, string][] = [
-  ['risk', 'plan'],
-  ['probability', 'plan'],
-  ['plan', 'draft'],
-  ['draft', 'reflect'],
-];
-
-const TONIC = '#D9FB5F';
-const PINK = '#FF7BB5';
-const DIM = 'rgba(217,251,95,0.32)';
-const MUTED = 'rgba(217,251,95,0.5)';
+const MINT = '#2BE38A';
+const CORAL = '#FF6B4D';
+const DIM = 'rgba(43,227,138,0.32)';
+const MUTED = 'rgba(43,227,138,0.5)';
 
 /**
  * An orb's colour says what the STEP is doing, never what it found.
@@ -56,10 +30,10 @@ const MUTED = 'rgba(217,251,95,0.5)';
  * where a number being alarming belongs.
  */
 const stateColor = (status: NodeStatus): string => {
-  if (status === 'error') return PINK;
+  if (status === 'error') return CORAL;
   if (status === 'idle') return DIM;
   if (status === 'skipped') return MUTED;
-  return TONIC; // working and settled are both the live colour
+  return MINT; // working and settled are both the live colour
 };
 
 const node = (id: string) => NODES.find((n) => n.id === id)!;
@@ -103,20 +77,10 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
 }) => {
   const [viewRef, inView] = useInView<HTMLDivElement>(0.25);
 
-  const statuses = useMemo<Record<string, NodeStatus>>(() => {
-    if (error) return { risk: 'error', probability: 'error', plan: 'idle', draft: 'idle', reflect: 'idle' };
-    if (isSweeping) return { risk: 'active', probability: 'active', plan: 'idle', draft: 'idle', reflect: 'idle' };
-    if (!sweepResult) return { risk: 'idle', probability: 'idle', plan: 'idle', draft: 'idle', reflect: 'idle' };
-
-    const noAction = sweepResult.plan.branch === 'no_action';
-    const draftStatus: NodeStatus = noAction ? 'skipped' : 'done';
-    let reflectStatus: NodeStatus = 'idle';
-    if (!noAction) {
-      if (isApproving) reflectStatus = 'active';
-      else if (approveResult) reflectStatus = approveResult.status === 'skipped' ? 'skipped' : 'done';
-    }
-    return { risk: 'done', probability: 'done', plan: 'done', draft: draftStatus, reflect: reflectStatus };
-  }, [sweepResult, approveResult, isSweeping, isApproving, error]);
+  const statuses = useMemo<Record<string, NodeStatus>>(
+    () => computeStatuses({ sweepResult, approveResult, isSweeping, isApproving, error }),
+    [sweepResult, approveResult, isSweeping, isApproving, error]
+  );
 
   const colorFor = (status: NodeStatus) => stateColor(status);
 
@@ -176,13 +140,13 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
 
   if (error) {
     return (
-      <div className="slab" style={{ borderColor: PINK, color: PINK }}>
+      <div className="slab" style={{ borderColor: CORAL, color: CORAL }}>
         <h3 className="title" style={{ marginBottom: 10 }}>The agent didn’t answer</h3>
-        <p className="body" style={{ color: TONIC, opacity: 0.8, marginBottom: 20 }}>
+        <p className="body" style={{ color: MINT, opacity: 0.8, marginBottom: 20 }}>
           {error.details || error.error || 'The reasoning engine timed out. Free-tier rate limits do this.'}
         </p>
         {onRetry && (
-          <button className="pill" onClick={onRetry} style={{ ['--pill-fg' as string]: PINK, ['--pill-inv' as string]: '#000' }}>
+          <button className="pill" onClick={onRetry} style={{ ['--pill-fg' as string]: CORAL, ['--pill-inv' as string]: '#000' }}>
             <RefreshCw size={14} /> Try again
           </button>
         )}
@@ -234,14 +198,14 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
         {/* A slow sweep across the panel. Nothing on screen should ever be
             completely still, least of all the part claiming to be thinking. */}
         <g className="pf-sweep">
-          <line x1="0" y1="1.5" x2="0" y2={BASE} stroke={TONIC} strokeWidth="0.13" opacity="0.5" />
-          <line x1="-1.1" y1="3" x2="-1.1" y2={BASE} stroke={TONIC} strokeWidth="0.09" opacity="0.22" />
-          <line x1="-2.4" y1="5" x2="-2.4" y2={BASE} stroke={TONIC} strokeWidth="0.07" opacity="0.1" />
+          <line x1="0" y1="1.5" x2="0" y2={BASE} stroke={MINT} strokeWidth="0.13" opacity="0.5" />
+          <line x1="-1.1" y1="3" x2="-1.1" y2={BASE} stroke={MINT} strokeWidth="0.09" opacity="0.22" />
+          <line x1="-2.4" y1="5" x2="-2.4" y2={BASE} stroke={MINT} strokeWidth="0.07" opacity="0.1" />
         </g>
 
         {EDGES.map(([from, to], i) => {
           const state = edgeState(from, to);
-          const stroke = state === 'live' || state === 'done' ? TONIC : state === 'skipped' ? MUTED : DIM;
+          const stroke = state === 'live' || state === 'done' ? MINT : state === 'skipped' ? MUTED : DIM;
           const flowing = state === 'live' || state === 'done';
           return (
             <g key={`${from}-${to}`}>
@@ -336,8 +300,8 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
                   lineHeight: 1.28,
                   color:
                     status === 'idle' ? MUTED
-                    : status === 'error' ? PINK
-                    : alarming(n.id) && status === 'done' ? PINK
+                    : status === 'error' ? CORAL
+                    : alarming(n.id) && status === 'done' ? CORAL
                     : color,
                 }}
               >

@@ -14,17 +14,17 @@ import type { Invoice } from '../types';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-/* The table has to read as part of the yellow field, not as a widget dropped
-   onto it: acid background, black rules, inverted black header. */
+/* The table has to read as part of the mint field, not as a widget dropped
+   onto it: mint background, black rules, inverted black header. */
 const gridTheme = themeQuartz.withParams({
   accentColor: '#000000',
-  backgroundColor: '#D9FB5F',
-  dataBackgroundColor: '#D9FB5F',
+  backgroundColor: '#2BE38A',
+  dataBackgroundColor: '#2BE38A',
   foregroundColor: '#000000',
   textColor: '#000000',
   borderColor: 'rgba(0,0,0,0.20)',
   headerBackgroundColor: '#000000',
-  headerTextColor: '#D9FB5F',
+  headerTextColor: '#2BE38A',
   rowHoverColor: 'rgba(0,0,0,0.07)',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
   borderRadius: 0,
@@ -79,10 +79,10 @@ export const InvoiceGrid: React.FC<InvoiceGridProps> = ({
         type: 'numericColumn',
         width: 128,
         // Badly overdue is called out with a fill, not a hue: there is no
-        // red in this palette, and pink as type on tonic is unreadable.
+        // red in this palette, and coral as type on mint is unreadable.
         cellStyle: (p) =>
           (p.value ?? 0) > 30
-            ? { background: '#FF7BB5', color: '#000000', fontWeight: 800 }
+            ? { background: '#FF6B4D', color: '#000000', fontWeight: 800 }
             : { background: 'transparent', color: 'inherit', fontWeight: 400 },
       },
       { field: 'ignored_reminders', headerName: 'Ignored', type: 'numericColumn', width: 112 },

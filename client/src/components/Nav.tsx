@@ -13,11 +13,11 @@ const Mark: React.FC = () => (
 
 /**
  * Sticky nav that recolours itself from whichever field is currently behind
- * it, so it stays legible across the tonic/ink/pink sections without
+ * it, so it stays legible across the mint/ink/coral sections without
  * carrying its own background plate.
  */
 export const Nav: React.FC = () => {
-  const [on, setOn] = useState<'acid' | 'ink' | 'pink'>('acid');
+  const [on, setOn] = useState<'mint' | 'ink' | 'coral'>('mint');
 
   useEffect(() => {
     let raf = 0;
@@ -30,7 +30,7 @@ export const Nav: React.FC = () => {
       for (const el of fields) {
         const r = el.getBoundingClientRect();
         if (r.top <= probe && r.bottom > probe) {
-          setOn((el.dataset.field as 'acid' | 'ink' | 'pink') ?? 'acid');
+          setOn((el.dataset.field as 'mint' | 'ink' | 'coral') ?? 'mint');
           return;
         }
       }

@@ -1,24 +1,20 @@
 /* ==========================================================================
    CollectAI — design system
-   Three flat fields (tonic / ink / pink). Enormous grotesque type. One bold
+   Three flat fields (mint / ink / coral). Enormous grotesque type. One bold
    move: an ink trail that knocks the type out beneath it. Nothing soft.
    ========================================================================== */
 
 :root {
   /* Two colours and black. Both are FIELDS, not accents — the page is built
      out of them rather than decorated with them. */
-  --tonic: #D9FB5F;
-  --tonic-deep: #C4E84A;
-  --pink:  #FF7BB5;
-  --pink-deep: #F2609F;
+  --mint: #2BE38A;
+  --mint-deep: #1FC979;
+  --coral: #FF6B4D;
+  --coral-deep: #EC5436;
   --ink:   #000000;
   --bone:  #F7F4EC;   /* neutral, for small surfaces only */
 
-  /* Kept as aliases so nothing references a colour that no longer exists. */
-  --acid: var(--tonic);
-  --acid-deep: var(--tonic-deep);
-
-  /* State is field-aware: on a light field hue can't carry it (pink on tonic
+  /* State is field-aware: on a light field hue can't carry it (coral on mint
      is unreadable), so weight and shape do, and the colour stays ink. On the
      ink field the two brand colours take over. Overridden per .field below. */
   --warn: var(--ink);   /* at risk / overdue / needs attention */
@@ -28,9 +24,9 @@
   --ink-45: rgba(0,0,0,0.45);
   --ink-18: rgba(0,0,0,0.18);
   --ink-08: rgba(0,0,0,0.08);
-  --acid-60: rgba(217,251,95,0.6);
-  --acid-45: rgba(217,251,95,0.45);
-  --acid-18: rgba(217,251,95,0.18);
+  --mint-60: rgba(43,227,138,0.6);
+  --mint-45: rgba(43,227,138,0.45);
+  --mint-18: rgba(43,227,138,0.18);
 
   --display: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   --data: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
@@ -63,12 +59,12 @@ html, body, #root {
 
 body { overflow-x: hidden; }
 
-::selection { background: var(--ink); color: var(--acid); }
-.field--ink ::selection { background: var(--acid); color: var(--ink); }
+::selection { background: var(--ink); color: var(--mint); }
+.field--ink ::selection { background: var(--mint); color: var(--ink); }
 
 ::-webkit-scrollbar { width: 11px; }
 ::-webkit-scrollbar-track { background: var(--ink); }
-::-webkit-scrollbar-thumb { background: var(--acid); }
+::-webkit-scrollbar-thumb { background: var(--mint); }
 ::-webkit-scrollbar-thumb:hover { background: #fff; }
 
 :focus-visible {
@@ -84,11 +80,11 @@ body { overflow-x: hidden; }
   width: 100%;
   padding: clamp(56px, 9vw, 130px) var(--gutter);
 }
-.field--acid { background: var(--tonic); color: var(--ink); }
-.field--ink  { background: var(--ink);  color: var(--tonic); }
+.field--mint { background: var(--mint); color: var(--ink); }
+.field--ink  { background: var(--ink);  color: var(--mint); }
 /* On the ink field the two brand colours can carry state directly. */
-.field--ink  { --warn: var(--pink); --ok: var(--tonic); }
-.field--pink { background: var(--pink); color: var(--ink); }
+.field--ink  { --warn: var(--coral); --ok: var(--mint); }
+.field--coral { background: var(--coral); color: var(--ink); }
 
 .field--flush { padding-top: 0; }
 .field--tight { padding-block: clamp(40px, 6vw, 80px); }
@@ -220,23 +216,23 @@ body { overflow-x: hidden; }
 }
 .pill:hover::before,
 .pill:focus-visible::before { transform: translateY(0); }
-.pill:hover { color: var(--pill-inv, var(--acid)); }
+.pill:hover { color: var(--pill-inv, var(--mint)); }
 .pill:active { transform: scale(0.97); }
 .pill:disabled { opacity: 0.32; cursor: not-allowed; }
 .pill:disabled::before { transform: translateY(101%); }
 
 /* field-aware variants */
-.field--ink .pill,  .pill--on-ink  { --pill-fg: var(--acid); --pill-inv: var(--ink); }
-.field--acid .pill, .pill--on-acid { --pill-fg: var(--ink);  --pill-inv: var(--tonic); }
-.field--pink .pill, .pill--on-pink { --pill-fg: var(--ink);  --pill-inv: var(--pink); }
+.field--ink .pill,  .pill--on-ink  { --pill-fg: var(--mint); --pill-inv: var(--ink); }
+.field--mint .pill, .pill--on-mint { --pill-fg: var(--ink);  --pill-inv: var(--mint); }
+.field--coral .pill, .pill--on-coral { --pill-fg: var(--ink);  --pill-inv: var(--coral); }
 
 /* solid, high-priority action */
-.pill--solid { background: var(--pill-fg); color: var(--pill-inv, var(--acid)); }
-.pill--solid::before { background: var(--pill-inv, var(--acid)); }
+.pill--solid { background: var(--pill-fg); color: var(--pill-inv, var(--mint)); }
+.pill--solid::before { background: var(--pill-inv, var(--mint)); }
 .pill--solid:hover { color: var(--pill-fg); }
 
-.pill--go     { --pill-fg: var(--ok);    --pill-inv: var(--tonic); }
-.pill--stop   { --pill-fg: var(--warn);  --pill-inv: var(--pink); }
+.pill--go     { --pill-fg: var(--ok);    --pill-inv: var(--mint); }
+.pill--stop   { --pill-fg: var(--warn);  --pill-inv: var(--coral); }
 .pill--lg     { padding: 17px 36px; font-size: 0.95rem; }
 .pill--sm     { padding: 9px 17px;  font-size: 0.72rem; }
 .pill--icon   { padding: 11px; border-radius: 999px; }
@@ -259,17 +255,17 @@ body { overflow-x: hidden; }
   white-space: nowrap;
 }
 .tag--solid  { background: currentColor; }
-.tag--solid > * { color: var(--acid); }
-/* State reads as a filled chip, not as coloured text — pink on tonic is
+.tag--solid > * { color: var(--mint); }
+/* State reads as a filled chip, not as coloured text — coral on mint is
    unreadable as type, and red/green were never in this palette. */
-.tag--risk   { background: var(--pink);  color: var(--ink); border-color: var(--ink); }
-.tag--paid   { background: var(--ink);   color: var(--tonic); border-color: var(--ink); }
-.field--ink .tag--risk { background: var(--pink);  color: var(--ink); border-color: var(--pink); }
-.field--ink .tag--paid { background: var(--tonic); color: var(--ink); border-color: var(--tonic); }
-/* On the pink field a pink chip is invisible, so the fill inverts and the two
+.tag--risk   { background: var(--coral);  color: var(--ink); border-color: var(--ink); }
+.tag--paid   { background: var(--ink);   color: var(--mint); border-color: var(--ink); }
+.field--ink .tag--risk { background: var(--coral);  color: var(--ink); border-color: var(--coral); }
+.field--ink .tag--paid { background: var(--mint); color: var(--ink); border-color: var(--mint); }
+/* On the coral field a coral chip is invisible, so the fill inverts and the two
    states separate by their type colour instead. */
-.field--pink .tag--risk { background: var(--ink); color: var(--pink);  border-color: var(--ink); }
-.field--pink .tag--paid { background: var(--ink); color: var(--tonic); border-color: var(--ink); }
+.field--coral .tag--risk { background: var(--ink); color: var(--coral);  border-color: var(--ink); }
+.field--coral .tag--paid { background: var(--ink); color: var(--mint); border-color: var(--ink); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; position: relative; }
 /* The pulse is a scaling pseudo-element rather than a spreading box-shadow,
@@ -295,8 +291,8 @@ body { overflow-x: hidden; }
   padding: clamp(18px, 2.4vw, 30px);
   position: relative;
 }
-.slab--fill-ink  { background: var(--ink);  color: var(--acid); }
-.slab--fill-acid { background: var(--acid); color: var(--ink); }
+.slab--fill-ink  { background: var(--ink);  color: var(--mint); }
+.slab--fill-mint { background: var(--mint); color: var(--ink); }
 .slab--fill-bone { background: var(--bone); color: var(--ink); }
 
 
@@ -336,8 +332,8 @@ body { overflow-x: hidden; }
 
 /* ==========================================================================
    LIQUID BLOBS — the one bold move.
-   Yellow fill + difference blend: reads black over the acid field, and knocks
-   the type beneath it out to yellow. Same layer inverts over the ink field.
+   Mint fill + difference blend: reads black over the mint field, and knocks
+   the type beneath it out to mint. Same layer inverts over the ink field.
    ========================================================================== */
 /* Deliberately NOT inset:0. This is a small box that follows the mass, because
    the blend makes the compositor re-blend every pixel it covers against the
@@ -371,7 +367,7 @@ body { overflow-x: hidden; }
   width: 54px;
   height: 54px;
   border-radius: 50%;
-  background: var(--acid);
+  background: var(--mint);
   animation: boot-dot 1.35s var(--inout) forwards;
 }
 @keyframes boot-dot {
@@ -398,11 +394,11 @@ body { overflow-x: hidden; }
   /* The plate is painted in whichever field is behind it, so it reads as the
      field simply continuing rather than as a chrome bar — while still stopping
      content from scrolling illegibly under the wordmark. */
-  background: var(--acid);
+  background: var(--mint);
   transition: color 0.45s var(--out), background 0.45s var(--out);
 }
-.nav[data-on='ink']  { color: var(--acid); background: var(--ink); }
-.nav[data-on='pink'] { color: var(--ink);  background: var(--pink); }
+.nav[data-on='ink']  { color: var(--mint); background: var(--ink); }
+.nav[data-on='coral'] { color: var(--ink);  background: var(--coral); }
 
 /* The nav is fixed, so it is inside no field and its pills never pick up a
    field's colours — they kept the root's and went invisible the moment the
@@ -410,9 +406,9 @@ body { overflow-x: hidden; }
    section. Setting the variables on .nav itself does NOT fix it: .pill
    declares --pill-fg on itself, and a property set on the element beats one
    inherited from an ancestor. It has to be targeted at the pill. */
-.nav[data-on='acid'] .pill { --pill-fg: var(--ink);  --pill-inv: var(--tonic); }
-.nav[data-on='ink']  .pill { --pill-fg: var(--acid); --pill-inv: var(--ink); }
-.nav[data-on='pink'] .pill { --pill-fg: var(--ink);  --pill-inv: var(--pink); }
+.nav[data-on='mint'] .pill { --pill-fg: var(--ink);  --pill-inv: var(--mint); }
+.nav[data-on='ink']  .pill { --pill-fg: var(--mint); --pill-inv: var(--ink); }
+.nav[data-on='coral'] .pill { --pill-fg: var(--ink);  --pill-inv: var(--coral); }
 
 .brand {
   display: inline-flex;
@@ -433,6 +429,109 @@ body { overflow-x: hidden; }
 @keyframes mark-spin { to { transform: rotate(360deg); } }
 
 .nav-links { display: flex; gap: 9px; }
+
+/* ==========================================================================
+   PIPELINE RAIL — the agent's state, kept on screen
+   An ink plate with a mint edge, which is legible over all three fields, so
+   it needs none of the field-tracking the nav does.
+   ========================================================================== */
+.prail {
+  position: fixed;
+  left: 50%;
+  bottom: var(--gutter);
+  z-index: 70;              /* above the cursor canvas (50) so the ink trail
+                               passes behind it and it stays readable; below
+                               the error toast (200) and the modal (300). */
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 18px 11px 16px;
+  background: var(--ink);
+  border: 2px solid var(--mint);
+  border-radius: 999px;
+  color: var(--mint);
+  cursor: pointer;
+  font: inherit;
+  /* Parked just below the fold until the pipeline is behind you. */
+  transform: translate(-50%, calc(100% + var(--gutter)));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.5s var(--out),
+    opacity 0.3s linear,
+    border-color 0.3s linear,
+    bottom 0.35s var(--out);
+}
+.prail.is-up {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.prail:hover { border-color: #fff; }
+.prail:focus-visible { outline: 3px solid var(--mint); outline-offset: 4px; }
+
+.prail-cap {
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+.prail-track { width: 148px; height: auto; display: block; overflow: visible; }
+
+.prail-seg {
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  transition: stroke 0.4s linear, opacity 0.4s linear;
+}
+.prail-seg--idle    { stroke: var(--mint); opacity: 0.26; }
+.prail-seg--skipped { stroke: var(--mint); opacity: 0.4; stroke-dasharray: 1.6 2; }
+.prail-seg--done    { stroke: var(--mint); opacity: 1; }
+.prail-seg--live    { stroke: var(--mint); opacity: 1; }
+
+.prail-node { color: var(--mint); transition: color 0.4s linear; }
+.prail-node--error { color: var(--coral); }
+.prail-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.9;
+  opacity: 0.32;
+  transition: opacity 0.4s linear;
+}
+.prail-node--done .prail-ring,
+.prail-node--active .prail-ring,
+.prail-node--error .prail-ring { opacity: 1; }
+.prail-node--skipped .prail-ring { opacity: 0.45; stroke-dasharray: 1.5 1.6; }
+.prail-fill { fill: currentColor; }
+
+/* Only the step actually working gets movement. */
+.prail-ping {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.8;
+  transform-origin: center;
+  animation: prail-ping 1.5s var(--out) infinite;
+}
+@keyframes prail-ping {
+  0%   { transform: scale(0.75); opacity: 0.85; }
+  70%  { transform: scale(1.75); opacity: 0; }
+  100% { transform: scale(1.75); opacity: 0; }
+}
+
+@media (max-width: 460px) {
+  .prail-cap { display: none; }
+  .prail { padding: 10px 16px; }
+  .prail-track { width: 124px; }
+}
+/* On a phone the error toast spans the width of this corner, so step aside. */
+@media (max-width: 720px) {
+  .prail.is-nudged { bottom: calc(var(--gutter) + 118px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prail { transition: opacity 0.2s linear; }
+  .prail-ping { animation: none; opacity: 0; }
+}
 
 /* ==========================================================================
    MARQUEE
@@ -499,7 +598,7 @@ body { overflow-x: hidden; }
 }
 .inp::placeholder { color: currentColor; opacity: 0.38; }
 .inp:focus { background: var(--ink-08); }
-.field--ink .inp:focus, .slab--fill-ink .inp:focus { background: var(--acid-18); }
+.field--ink .inp:focus, .slab--fill-ink .inp:focus { background: var(--mint-18); }
 
 .lbl {
   display: block;
@@ -533,7 +632,7 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   max-width: 540px;
   max-height: 88vh;
   overflow-y: auto;
-  background: var(--acid);
+  background: var(--mint);
   color: var(--ink);
   border: 2px solid var(--ink);
   padding: clamp(22px, 3vw, 34px);
@@ -729,16 +828,16 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--acid);
+  color: var(--mint);
 }
 .grid-shell .ag-header-cell::after,
 .grid-shell .ag-header-group-cell::after { display: none; }
-.grid-shell .ag-icon { color: var(--acid); }
+.grid-shell .ag-icon { color: var(--mint); }
 .grid-shell .ag-row { border-bottom: 2px solid var(--ink-18); background: transparent; }
 .grid-shell .ag-row-hover { background: var(--ink-08) !important; }
 .grid-shell .ag-row-selected,
-.grid-shell .ag-row-selected::before { background: var(--ink) !important; color: var(--acid) !important; }
-.grid-shell .ag-row-selected .ag-cell { color: var(--acid); }
+.grid-shell .ag-row-selected::before { background: var(--ink) !important; color: var(--mint) !important; }
+.grid-shell .ag-row-selected .ag-cell { color: var(--mint); }
 .grid-shell .ag-cell {
   font-family: var(--data);
   font-size: 0.84rem;

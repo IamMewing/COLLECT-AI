@@ -321,18 +321,31 @@ export const App: React.FC = () => {
         </footer>
       </main>
 
-      {/* Errors sit above everything, out of the reading flow. */}
+      {/* Errors sit above everything, out of the reading flow.
+          A real-mode failure's `details` is the agent's actual exception
+          message, which can still run long — so this is capped and scrolls
+          internally, with the dismiss button kept in its own non-shrinking
+          header row. It used to be one unbounded block: a sufficiently long
+          `details` (a raw Python traceback once did this before the server
+          started trimming it) grew the whole toast past the viewport and
+          pushed the × button off the top of the screen with it, leaving no
+          way to dismiss it at all. */}
       {error && (
         <div
           role="alert"
           style={{
             position: 'fixed', left: 'var(--gutter)', bottom: 'var(--gutter)', zIndex: 200,
             maxWidth: 'min(460px, calc(100vw - var(--gutter) * 2))',
+            maxHeight: 'min(70vh, 480px)',
+            display: 'flex', flexDirection: 'column',
             background: 'var(--coral)', color: 'var(--ink)',
-            border: '2px solid #fff', padding: '18px 20px',
+            border: '2px solid #fff', overflow: 'hidden',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start' }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start',
+            flex: 'none', padding: '18px 20px', paddingBottom: error.details ? 8 : 18,
+          }}>
             <strong style={{ fontSize: '1rem', letterSpacing: '-0.02em' }}>{error.error}</strong>
             <button
               onClick={() => setError(null)}
@@ -343,7 +356,12 @@ export const App: React.FC = () => {
             </button>
           </div>
           {error.details && (
-            <p className="body body--sm" style={{ marginTop: 8 }}>{error.details}</p>
+            <p
+              className="body body--sm"
+              style={{ margin: 0, padding: '0 20px 18px', overflowY: 'auto', minHeight: 0, whiteSpace: 'pre-wrap' }}
+            >
+              {error.details}
+            </p>
           )}
         </div>
       )}

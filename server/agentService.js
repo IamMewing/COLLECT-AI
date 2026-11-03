@@ -11,6 +11,36 @@ const BRIDGE_SCRIPT = path.join(__dirname, 'agent_bridge.py');
 const PYTHON_CMD = process.env.PYTHON_PATH || 'python';
 
 /**
+ * A failed real-mode sweep can produce tens of KB of stderr: every retry
+ * wrapper warning (3 attempts × however many parallel nodes) plus the full
+ * Python traceback, all before the actual raised exception. That belongs in
+ * Cloud Run's logs (still captured there via console.error below), not in
+ * the response body — a client that renders `details` verbatim has no
+ * reason to expect it could be that large, and it was never meant to be
+ * read as a wall of text in a UI toast.
+ *
+ * This finds the LAST point in the text that looks like a raised exception
+ * ("some.module.SomeError: message") and keeps everything from there,
+ * capped. Searching the whole blob rather than splitting on '\n' first
+ * matters here: a dict repr'd into an error message (as the Gemini SDK
+ * does) embeds its own literal "\n" as text, not a real line break, so a
+ * line-based search can walk straight past the actual exception. Falls
+ * back to the last non-empty line if no exception marker is found at all.
+ * Either way the result is hard-capped, so a parsing miss on some future
+ * error shape still can't reproduce the original wall-of-text bug.
+ */
+function summarizeStderr(stderr) {
+  if (!stderr) return null;
+  const cap = (s) => (s.length > 600 ? s.slice(0, 600) + '…' : s);
+  const matches = [...stderr.matchAll(/[\w.]*(?:Error|Exception):/g)];
+  if (matches.length > 0) {
+    return cap(stderr.slice(matches[matches.length - 1].index).trim());
+  }
+  const lines = stderr.split('\n').map((l) => l.trim()).filter(Boolean);
+  return cap(lines[lines.length - 1] || stderr.trim());
+}
+
+/**
  * Execute an action against the Python agent bridge.
  *
  * @param {string} action - 'sweep' | 'approve'
@@ -54,14 +84,16 @@ function callAgentBridge(action, payload) {
 
     child.on('close', (code) => {
       if (code !== 0) {
-        const errorSummary = stderrData.trim() || `Python process exited with code ${code}`;
-        console.error(`🔴 [AgentService] Error in action '${action}':\n`, errorSummary);
+        const fullStderr = stderrData.trim();
+        // Full output still goes to Cloud Run logs for real debugging —
+        // only the trimmed summary goes to the client.
+        console.error(`🔴 [AgentService] Error in action '${action}':\n`, fullStderr || `exit code ${code}`);
 
         return reject({
           status: 500,
           error: `Strands Agent execution failed (exit code ${code})`,
-          details: errorSummary,
-          stderr: stderrData.trim(),
+          details: summarizeStderr(fullStderr) || `Python process exited with code ${code}`,
+          stderr: null,
           action,
         });
       }
@@ -70,13 +102,15 @@ function callAgentBridge(action, payload) {
         const parsed = JSON.parse(stdoutData.trim());
         resolve(parsed);
       } catch (parseErr) {
+        // Full stdout/stderr go to Cloud Run logs; the client gets the
+        // parse error message only — same reasoning as the exit-code branch
+        // above, stdout here can be arbitrarily large too.
         console.error('🔴 [AgentService] Failed to parse Python stdout as JSON:', stdoutData);
         reject({
           status: 500,
           error: 'Invalid JSON response from Strands Agent bridge',
           details: parseErr.message,
-          stdout: stdoutData,
-          stderr: stderrData.trim(),
+          stderr: null,
         });
       }
     });

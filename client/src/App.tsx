@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError } from './types';
+import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioOutcome } from './types';
 import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, checkPaypalStatus } from './api';
 import { Boot } from './components/Boot';
 import { LiquidBlobs } from './components/LiquidBlobs';
@@ -97,6 +97,31 @@ export const App: React.FC = () => {
     setSweepResult(null);
     setApproveResult(null);
     setError(null);
+  };
+
+  /** "Open" on a portfolio-sweep row. A succeeded row already has the full
+   *  SweepResult from the batch call — reuse it and jump straight to the
+   *  pipeline, no second network round-trip. A failed row has no pipeline
+   *  state to show, so instead this surfaces the real failure in the same
+   *  error toast the single-invoice path uses (rather than leaving the
+   *  person to go dig through Cloud Run logs for why Gemini choked) and
+   *  scrolls to where they'd retry it. */
+  const handleOpenPortfolioResult = (invoice: Invoice, outcome: PortfolioOutcome) => {
+    setSelectedInvoice(invoice);
+    setApproveResult(null);
+    if (outcome.ok) {
+      setError(null);
+      setSweepResult(outcome);
+      document.getElementById('agent')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      setSweepResult(null);
+      setError({
+        error: `The agent failed on ${invoice.client_name}`,
+        details: outcome.details || outcome.error,
+        stderr: null,
+      });
+      document.getElementById('selector')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const handleRunSweep = async (inv: Invoice) => {
@@ -242,7 +267,7 @@ export const App: React.FC = () => {
             selectedInvoiceId={selectedInvoice?.invoice_id}
             onSelectInvoice={handleSelectInvoice}
           />
-          <div style={{ marginTop: 'clamp(40px, 6vw, 78px)' }}>
+          <div id="selector" style={{ marginTop: 'clamp(40px, 6vw, 78px)' }}>
             <InvoiceSelector
               invoices={invoices}
               selectedInvoice={selectedInvoice}
@@ -254,7 +279,7 @@ export const App: React.FC = () => {
               isMarkingPaid={isMarkingPaid}
             />
           </div>
-          <PortfolioSweep invoices={invoices} onSelectInvoice={handleSelectInvoice} />
+          <PortfolioSweep invoices={invoices} onOpen={handleOpenPortfolioResult} />
         </Field>
 
         <Torn from="mint" to="coral" variant={2} />

@@ -5,7 +5,12 @@ import { Zap, ChevronDown, AlertTriangle } from 'lucide-react';
 
 interface PortfolioSweepProps {
   invoices: Invoice[];
-  onSelectInvoice: (inv: Invoice) => void;
+  /** Invoked when "Open" is clicked on a row. Gets the matching Invoice plus
+   *  the full outcome, so the caller can show a succeeded row's existing
+   *  pipeline result without re-running the agent, or surface a failed
+   *  row's real error instead of just selecting the invoice and leaving
+   *  the person to guess why it didn't work. */
+  onOpen: (invoice: Invoice, outcome: PortfolioOutcome) => void;
 }
 
 const inr = (n: number) => '₹' + n.toLocaleString('en-IN');
@@ -26,7 +31,7 @@ const branchLabel = (o: PortfolioOutcome): { text: string; tone: 'escalate' | 's
  * click, bounded server-side so it can't fire a burst large enough to trip
  * the same rate limits the single-invoice path already retries around.
  */
-export const PortfolioSweep: React.FC<PortfolioSweepProps> = ({ invoices, onSelectInvoice }) => {
+export const PortfolioSweep: React.FC<PortfolioSweepProps> = ({ invoices, onOpen }) => {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<PortfolioSweepResult | null>(null);
   const [failedToStart, setFailedToStart] = useState<string | null>(null);
@@ -107,8 +112,12 @@ export const PortfolioSweep: React.FC<PortfolioSweepProps> = ({ invoices, onSele
             {result.results.map((o) => {
               const { text, tone } = branchLabel(o);
               const open = openRow === o.invoice_id;
-              const hasReason = o.ok && (o.plan?.reasoning || o.risk?.reasoning);
-              const toggle = () => hasReason && setOpenRow(open ? null : o.invoice_id);
+              // A succeeded row expands if there's reasoning text to show. A
+              // failed row always expands — the error is the whole point of
+              // opening it, and gating this on `o.ok` (as an earlier version
+              // did) left failed rows with nothing to click.
+              const expandable = o.ok ? !!(o.plan?.reasoning || o.risk?.reasoning) : true;
+              const toggle = () => expandable && setOpenRow(open ? null : o.invoice_id);
               return (
                 <li key={o.invoice_id} className="pswp-row">
                   {/* A div, not a button — it has a real button (Open) living
@@ -117,11 +126,11 @@ export const PortfolioSweep: React.FC<PortfolioSweepProps> = ({ invoices, onSele
                       or a stray click handler proves otherwise. */}
                   <div
                     className="pswp-row-main"
-                    role={hasReason ? 'button' : undefined}
-                    tabIndex={hasReason ? 0 : undefined}
+                    role={expandable ? 'button' : undefined}
+                    tabIndex={expandable ? 0 : undefined}
                     onClick={toggle}
-                    onKeyDown={(e) => { if (hasReason && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(); } }}
-                    aria-expanded={hasReason ? open : undefined}
+                    onKeyDown={(e) => { if (expandable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(); } }}
+                    aria-expanded={expandable ? open : undefined}
                   >
                     <span className="pswp-id mono">{o.invoice_id}</span>
                     <span className="pswp-client">{o.client_name}</span>
@@ -141,12 +150,12 @@ export const PortfolioSweep: React.FC<PortfolioSweepProps> = ({ invoices, onSele
                       <button
                         type="button"
                         className="pill pill--sm"
-                        onClick={(e) => { e.stopPropagation(); onSelectInvoice(byId.get(o.invoice_id)!); }}
+                        onClick={(e) => { e.stopPropagation(); onOpen(byId.get(o.invoice_id)!, o); }}
                       >
                         Open
                       </button>
                     )}
-                    {hasReason && (
+                    {expandable && (
                       <ChevronDown size={14} className={`pswp-chev${open ? ' is-open' : ''}`} />
                     )}
                   </div>

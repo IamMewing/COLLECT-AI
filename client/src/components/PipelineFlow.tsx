@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { SweepResult, ApproveResult, ApiError } from '../types';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ChevronDown } from 'lucide-react';
 import { useInView } from '../useInView';
 import type { NodeStatus } from './pipelineModel';
 import { NODES, EDGES, BASE, computeStatuses } from './pipelineModel';
@@ -92,6 +92,7 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
     const hot = sweepResult.risk.category === 'Critical' || sweepResult.risk.category === 'High';
     if (id === 'risk') return hot;
     if (id === 'probability') return sweepResult.probability.probability < 50;
+    if (id === 'plan') return sweepResult.plan.branch === 'escalation';
     if (id === 'draft') return sweepResult.plan.tone === 'urgent';
     return false;
   };
@@ -106,7 +107,12 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
       return <><CountUp value={sweepResult.probability.probability} />% likely to pay</>;
     }
     if (id === 'plan' && status === 'done' && sweepResult) {
-      return sweepResult.plan.branch === 'no_action' ? 'Leave it alone' : `Chase by ${sweepResult.plan.channel}`;
+      const { branch, channel } = sweepResult.plan;
+      if (branch === 'no_action') return 'Leave it alone';
+      // Escalation isn't a louder version of the same sentence — it's a
+      // different decision (this account has been chased before and ignored),
+      // so it gets its own verb rather than hiding inside "chase".
+      return branch === 'escalation' ? `Escalate via ${channel}` : `Chase by ${channel}`;
     }
     if (id === 'draft') {
       if (status === 'skipped') return 'Nothing sent';
@@ -122,6 +128,35 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
     if (status === 'active') return 'Working…';
     return node(id).sub;
   };
+
+  /** The sentence behind a score, when the step has one. This is the actual
+   *  model output — RiskAssessment.reasoning, ProbabilityAssessment.explanation,
+   *  ActionPlan.reasoning all come straight through from agent/models.py — not
+   *  a paraphrase written here. Reflection has no single "reasoning" field, so
+   *  its three structured judgments are composed into one. A node with nothing
+   *  to show (draft, or anything not finished yet) returns null and gets no
+   *  disclosure control at all, rather than an empty one. */
+  const reasonFor = (id: string): string | null => {
+    if (id === 'risk' && sweepResult) return sweepResult.risk.reasoning;
+    if (id === 'probability' && sweepResult) return sweepResult.probability.explanation;
+    if (id === 'plan' && sweepResult) return sweepResult.plan.reasoning;
+    if (id === 'reflect' && approveResult?.reflection) {
+      const r = approveResult.reflection;
+      const delta = r.suggested_relationship_delta;
+      const dir = delta > 0 ? `raise standing by ${delta}` : delta < 0 ? `lower standing by ${Math.abs(delta)}` : 'leave standing unchanged';
+      return `${r.was_best_decision ? 'Judged the right call.' : 'Flagged for review — a different move might have landed better.'} Next time: ${r.suggested_tone_shift.toLowerCase()}. Memory update: ${dir}.`;
+    }
+    return null;
+  };
+
+  const [revealed, setRevealed] = useState<string | null>(null);
+  // A node finishing with its text already open (e.g. risk re-settling after a
+  // retry) shouldn't leave the panel pointed at a node that no longer has
+  // anything to say.
+  useEffect(() => {
+    if (revealed && reasonFor(revealed) === null) setRevealed(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sweepResult, approveResult]);
 
   const edgeState = (_from: string, to: string): 'live' | 'done' | 'skipped' | 'idle' => {
     const sTo = statuses[to];
@@ -241,11 +276,23 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
           const color = colorFor(status);
           const active = status === 'active';
           const done = status === 'done';
+          const reason = reasonFor(n.id);
+          const open = revealed === n.id;
           return (
             <g key={n.id} transform={`translate(${n.x}, ${n.y})`}>
               <g
-                className={`pf-orb pf-orb--${status}`}
+                className={`pf-orb pf-orb--${status}${reason ? ' pf-orb--has-reason' : ''}${open ? ' pf-orb--open' : ''}`}
                 style={{ ['--i' as string]: i, color }}
+                {...(reason ? {
+                  role: 'button',
+                  tabIndex: 0,
+                  'aria-expanded': open,
+                  'aria-label': `${n.name} — ${open ? 'hide' : 'show'} the agent's reasoning`,
+                  onClick: () => setRevealed(open ? null : n.id),
+                  onKeyDown: (e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRevealed(open ? null : n.id); }
+                  },
+                } : {})}
               >
                 {/* An orb, not a dot: two shells counter-rotating around a
                     core. Waiting, they barely turn and the core is hollow.
@@ -266,6 +313,13 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
                     so the core isn't a dead disc. */}
                 {active && <circle className="pf-spark" r="0.42" cx="0" cy="-0.55" />}
 
+                {/* A step with something to say gets a small ring of dots round
+                    its core, independent of status colour, so "there is more
+                    here" reads as its own signal rather than borrowing done's. */}
+                {reason && !active && (
+                  <circle className="pf-ask" r="1.85" pathLength="1" />
+                )}
+
                 <text
                   className="pf-index"
                   x="0"
@@ -285,32 +339,59 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
         {NODES.map((n, i) => {
           const status = statuses[n.id];
           const color = colorFor(status);
+          const reason = reasonFor(n.id);
+          const open = revealed === n.id;
           return (
             <div className="readout pf-readout" key={n.id} style={{ ['--i' as string]: i }}>
               <dt style={{ opacity: 1, color: status === 'idle' ? MUTED : color }}>
                 {status === 'active' && <span className="dot dot--live" style={{ display: 'inline-block', marginRight: 7 }} />}
                 {n.name}
               </dt>
-              <dd
-                style={{
-                  fontFamily: 'var(--display)',
-                  fontWeight: 600,
-                  letterSpacing: '-0.015em',
-                  fontSize: 'clamp(0.85rem, 1.15vw, 1.02rem)',
-                  lineHeight: 1.28,
-                  color:
-                    status === 'idle' ? MUTED
-                    : status === 'error' ? CORAL
-                    : alarming(n.id) && status === 'done' ? CORAL
-                    : color,
-                }}
-              >
-                {readingFor(n.id, status)}
-              </dd>
+              {reason ? (
+                <button
+                  type="button"
+                  className="pf-reveal"
+                  onClick={() => setRevealed(open ? null : n.id)}
+                  aria-expanded={open}
+                  style={{
+                    color: status === 'error' ? CORAL : alarming(n.id) && status === 'done' ? CORAL : color,
+                  }}
+                >
+                  <span className="pf-reveal-text">{readingFor(n.id, status)}</span>
+                  <ChevronDown size={13} className={`pf-reveal-chev${open ? ' is-open' : ''}`} />
+                </button>
+              ) : (
+                <dd
+                  style={{
+                    fontFamily: 'var(--display)',
+                    fontWeight: 600,
+                    letterSpacing: '-0.015em',
+                    fontSize: 'clamp(0.85rem, 1.15vw, 1.02rem)',
+                    lineHeight: 1.28,
+                    color:
+                      status === 'idle' ? MUTED
+                      : status === 'error' ? CORAL
+                      : alarming(n.id) && status === 'done' ? CORAL
+                      : color,
+                  }}
+                >
+                  {readingFor(n.id, status)}
+                </dd>
+              )}
             </div>
           );
         })}
       </div>
+
+      {/* The sentence behind whichever reading is open. One panel, not one per
+          column — five simultaneous paragraphs would fight the numbers above
+          them for attention, and only one node is ever being asked about. */}
+      {revealed && reasonFor(revealed) && (
+        <div className="pf-reason" role="note">
+          <span className="pf-reason-tag mono">{node(revealed).name.toUpperCase()}</span>
+          <p>{reasonFor(revealed)}</p>
+        </div>
+      )}
     </div>
   );
 };

@@ -275,6 +275,96 @@ app.post('/api/agent/sweep', async (req, res) => {
 });
 
 /**
+ * Runs an array of async jobs with at most `limit` in flight at once.
+ *
+ * A portfolio sweep fans out to one Python process per invoice (see
+ * agentService.callAgentBridge), each making real model calls in non-mock
+ * mode. Firing all of them at once is exactly what trips the free-tier rate
+ * limit this codebase already has retry logic for elsewhere — so this caps
+ * concurrency instead of relying on that retry to paper over a self-inflicted
+ * burst. One failed invoice is reported per-invoice, not thrown — a demo
+ * sweeping five accounts shouldn't go blank because the third one rate-limited.
+ */
+async function withConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function runNext() {
+    while (next < items.length) {
+      const i = next++;
+      try {
+        results[i] = { ok: true, value: await worker(items[i], i) };
+      } catch (err) {
+        results[i] = { ok: false, error: err };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext));
+  return results;
+}
+
+/**
+ * POST /api/agent/sweep-all
+ * Runs the agent across every open (non-paid) invoice in one call, instead of
+ * one at a time — the difference between demonstrating the agent and
+ * demonstrating a receivables ops tool. Optional body: { invoice_ids: [...] }
+ * to scope the sweep to a subset; omitted or empty means "everything open".
+ */
+app.post('/api/agent/sweep-all', async (req, res) => {
+  try {
+    const statusMap = loadInvoiceStatus();
+    const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
+    const all = [...loadUserInvoices(), ...SAMPLE_INVOICES].map(withStatus);
+
+    const requestedIds = Array.isArray(req.body?.invoice_ids) ? new Set(req.body.invoice_ids) : null;
+    const targets = all.filter((inv) => {
+      if (inv.status === 'paid') return false;
+      return !requestedIds || requestedIds.has(inv.invoice_id);
+    });
+
+    if (targets.length === 0) {
+      return res.json({ results: [], summary: { total: 0, escalation: 0, standard: 0, no_action: 0, failed: 0 } });
+    }
+
+    console.log(`\n📋 [POST /api/agent/sweep-all] Sweeping ${targets.length} open invoice(s)…`);
+
+    const outcomes = await withConcurrency(targets, 2, (inv) => runSweep(inv));
+
+    const results = outcomes.map((o, i) => {
+      const invoice = targets[i];
+      if (!o.ok) {
+        const err = o.error || {};
+        return {
+          invoice_id: invoice.invoice_id,
+          client_name: invoice.client_name,
+          ok: false,
+          error: err.error || err.message || 'Sweep failed',
+          details: err.details || null,
+        };
+      }
+      return { invoice_id: invoice.invoice_id, client_name: invoice.client_name, ok: true, ...o.value };
+    });
+
+    const summary = results.reduce(
+      (acc, r) => {
+        acc.total += 1;
+        if (!r.ok) { acc.failed += 1; return acc; }
+        const branch = r.plan?.branch;
+        if (branch === 'escalation') acc.escalation += 1;
+        else if (branch === 'no_action') acc.no_action += 1;
+        else acc.standard += 1;
+        return acc;
+      },
+      { total: 0, escalation: 0, standard: 0, no_action: 0, failed: 0 }
+    );
+
+    res.json({ results, summary });
+  } catch (error) {
+    console.error('❌ [POST /api/agent/sweep-all] Failed:', error);
+    res.status(500).json({ error: 'Failed to sweep the portfolio', details: error.message });
+  }
+});
+
+/**
  * POST /api/agent/approve
  * Human-in-the-loop decision: Approve, Edit, or Reject a drafted message.
  * Calls agent.mock_approve_and_execute() (or real agent.approve_and_execute()).
@@ -358,6 +448,10 @@ app.get('/api/paypal/status', (req, res) => {
     configured: paypalService.isConfigured(),
     environment: (process.env.PAYPAL_ENV || 'sandbox').toLowerCase(),
     webhook_configured: Boolean(process.env.PAYPAL_WEBHOOK_ID),
+    // Surfaced so this misconfiguration shows up on a status page instead of
+    // only in server logs — it's the one setting that, left on, undoes the
+    // webhook handler's whole point.
+    webhook_unverified_allowed: (process.env.PAYPAL_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true',
   });
 });
 
@@ -370,20 +464,44 @@ app.get('/api/paypal/status', (req, res) => {
  * a genuine reflection on a real payment event, not a human checkbox.
  *
  * Signature verification needs PAYPAL_WEBHOOK_ID (set once you create the
- * webhook in the Developer Dashboard and copy its ID into .env). Until then,
- * events are processed but logged as UNVERIFIED — fine for local iteration,
- * tighten this (reject unverified events) before the final demo/submission.
+ * webhook in the Developer Dashboard and copy its ID into .env).
+ *
+ * An unverified event is REFUSED, not processed-with-a-warning — this is the
+ * one endpoint in the app that can be made to capture a real payment and
+ * mark an invoice closed, so trusting a POST just because it arrived here
+ * would mean anyone who finds this URL can forge "the client paid" for any
+ * invoice they know the PayPal order id for. The one escape hatch is
+ * PAYPAL_WEBHOOK_ALLOW_UNVERIFIED=true, for local testing without a
+ * registered webhook — it must never be true where this is actually
+ * reachable from the internet.
  */
 app.post('/api/paypal/webhook', async (req, res) => {
   try {
     const rawBody = req.rawBody ? req.rawBody.toString('utf-8') : JSON.stringify(req.body);
     const verified = await paypalService.verifyWebhookSignature(req.headers, rawBody);
+    const allowUnverified = (process.env.PAYPAL_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true';
 
     if (!verified) {
+      const reason = process.env.PAYPAL_WEBHOOK_ID
+        ? 'signature verification failed'
+        : 'PAYPAL_WEBHOOK_ID is not set, so there is nothing to verify the signature against';
+
+      if (!allowUnverified) {
+        console.warn(`⛔ [PayPal webhook] Rejected (401) — ${reason}.`);
+        // 401, not 200: an unverified call must not look like a successful,
+        // trusted delivery to whoever sent it. A correctly-configured real
+        // PayPal webhook is always signed, so this branch never fires for
+        // genuine traffic once PAYPAL_WEBHOOK_ID is set — it only stops a
+        // forged or misrouted POST from being treated as one.
+        return res.status(401).json({
+          error: 'Webhook signature not verified',
+          details: reason,
+        });
+      }
+
       console.warn(
-        process.env.PAYPAL_WEBHOOK_ID
-          ? '⚠️  [PayPal webhook] Signature verification FAILED — processing anyway for now, but check PAYPAL_WEBHOOK_ID.'
-          : '⚠️  [PayPal webhook] PAYPAL_WEBHOOK_ID not set — event is UNVERIFIED. Set it before the final demo.'
+        `⚠️  [PayPal webhook] UNVERIFIED event processed anyway — ${reason}. ` +
+        `PAYPAL_WEBHOOK_ALLOW_UNVERIFIED is set; this must be unset wherever this server is internet-reachable.`
       );
     }
 

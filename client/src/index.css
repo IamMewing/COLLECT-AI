@@ -813,6 +813,136 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   to   { opacity: 1; transform: none; }
 }
 
+/* A step that can explain itself: a dotted ring round the core, independent
+   of the shells, and a pointer cursor — the only hint that there's a sentence
+   behind the number until it's actually clicked. */
+.pf-orb--has-reason { cursor: pointer; }
+.pf-ask {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.1;
+  stroke-dasharray: 0.06 0.1;
+  opacity: 0.55;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pf-spin 40s linear infinite;
+  transition: opacity 0.3s linear;
+}
+.pf-orb--has-reason:hover .pf-ask,
+.pf-orb--open .pf-ask { opacity: 1; }
+.pf-orb--has-reason:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 50%; }
+
+/* The readout becomes a button once it has something to disclose — same type
+   as the plain <dd> it replaces, so the row doesn't jump when a sweep starts
+   returning reasoning for a column that had none a moment ago. */
+.pf-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  font-size: clamp(0.85rem, 1.15vw, 1.02rem);
+  line-height: 1.28;
+  text-align: left;
+  color: inherit;
+}
+.pf-reveal:hover .pf-reveal-text { text-decoration: underline; text-underline-offset: 3px; text-decoration-style: dotted; }
+.pf-reveal-chev { flex: none; opacity: 0.6; transition: transform 0.3s var(--out), opacity 0.2s linear; }
+.pf-reveal-chev.is-open { transform: rotate(180deg); opacity: 1; }
+
+/* The sentence itself, opened below the whole row rather than inside one
+   narrow column, where a real explanation would wrap into a ladder. */
+.pf-reason {
+  margin-top: clamp(18px, 2.4vw, 28px);
+  padding: clamp(14px, 2vw, 20px) clamp(16px, 2.2vw, 24px);
+  border: 1.5px solid var(--mint-45);
+  background: var(--mint-08, rgba(43,227,138,0.08));
+  animation: pf-reason-in 0.32s var(--out);
+}
+@keyframes pf-reason-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+.pf-reason-tag {
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  opacity: 0.6;
+  margin-bottom: 8px;
+}
+.pf-reason p {
+  font-size: clamp(0.92rem, 1.3vw, 1.08rem);
+  line-height: 1.5;
+  max-width: 62ch;
+}
+
+/* ==========================================================================
+   PORTFOLIO SWEEP — the agent run across every open account at once
+   ========================================================================== */
+.pswp {
+  border: 2px solid var(--ink);
+  padding: clamp(18px, 2.6vw, 30px);
+  margin-top: clamp(28px, 4vw, 48px);
+}
+.pswp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: clamp(18px, 3vw, 32px);
+  flex-wrap: wrap;
+}
+.pswp-summary {
+  margin-top: clamp(22px, 3vw, 32px);
+  padding-top: clamp(18px, 2.4vw, 26px);
+  border-top: 2px solid var(--ink-18);
+}
+.pswp-list {
+  list-style: none;
+  margin-top: clamp(18px, 2.4vw, 26px);
+  border-top: 2px solid var(--ink);
+}
+.pswp-row { border-bottom: 2px solid var(--ink-18); }
+.pswp-row-main {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 1.6vw, 18px);
+  width: 100%;
+  padding: 12px 2px;
+  background: none;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  flex-wrap: wrap;
+}
+.pswp-row-main[role='button'] { cursor: pointer; }
+.pswp-row-main[role='button']:hover { background: var(--ink-08); }
+.pswp-row-main:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.pswp-id { font-size: 0.78rem; opacity: 0.6; flex: none; }
+.pswp-client { font-weight: 700; letter-spacing: -0.01em; flex: 1 1 140px; min-width: 0; }
+.pswp-amount { font-size: 0.82rem; opacity: 0.85; flex: none; }
+.pswp-odds { font-size: 0.72rem; flex: 1 1 auto; min-width: 160px; }
+.pswp-chev { flex: none; opacity: 0.55; transition: transform 0.3s var(--out), opacity 0.2s linear; margin-left: auto; }
+.pswp-chev.is-open { transform: rotate(180deg); opacity: 1; }
+.pswp-reason {
+  padding: 4px 2px 18px;
+  display: grid;
+  gap: 8px;
+  max-width: 68ch;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  opacity: 0.85;
+  animation: pf-reason-in 0.28s var(--out);
+}
+@media (max-width: 640px) {
+  .pswp-odds { order: 10; flex-basis: 100%; }
+}
+
 /* ==========================================================================
    AG GRID — bent into the system
    ========================================================================== */

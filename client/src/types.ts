@@ -81,3 +81,24 @@ export interface ApiError {
   stderr?: string | null;
   status?: number;
 }
+
+/** One invoice's outcome inside a portfolio sweep — either a normal
+ *  SweepResult's fields (plus the id/name duplicated at the top level by the
+ *  server for convenience), tagged ok:true, or a per-invoice failure that
+ *  doesn't take the rest of the batch down with it. */
+export type PortfolioOutcome =
+  | ({ invoice_id: string; client_name: string; ok: true } & SweepResult)
+  | { invoice_id: string; client_name: string; ok: false; error: string; details?: string | null };
+
+export interface PortfolioSummary {
+  total: number;
+  escalation: number;
+  standard: number;
+  no_action: number;
+  failed: number;
+}
+
+export interface PortfolioSweepResult {
+  results: PortfolioOutcome[];
+  summary: PortfolioSummary;
+}

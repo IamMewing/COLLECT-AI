@@ -80,5 +80,5 @@ export const runCaption = (s: RunState): string => {
   if (!s.sweepResult) return 'Agent idle';
   if (s.sweepResult.plan.branch === 'no_action') return 'Left alone';
   if (s.approveResult) return s.approveResult.status === 'skipped' ? 'Not sent' : 'Sent';
-  return 'Draft ready';
+  return s.sweepResult.plan.branch === 'escalation' ? 'Escalating' : 'Draft ready';
 };

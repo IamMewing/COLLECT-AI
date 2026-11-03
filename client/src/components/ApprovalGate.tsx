@@ -103,6 +103,11 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
           )}
           <span className={`tag${risky ? ' tag--risk' : ''}`}>{risk.category} risk</span>
           <span className={`tag${risky ? ' tag--risk' : ''}`}>{risk.score}/100</span>
+          {/* Escalation is a distinct decision, not just a firmer tone — the
+              agent is saying "I've been here before and it didn't work" — so
+              it earns its own warning-coloured tag rather than blending into
+              the tone tag next to it. */}
+          {plan.branch === 'escalation' && <span className="tag tag--risk">Escalated</span>}
           <span className="tag" style={{ opacity: 0.6 }}>{plan.tone} tone</span>
         </div>
 

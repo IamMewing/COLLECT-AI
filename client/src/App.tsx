@@ -10,6 +10,8 @@ import { PipelineFlow } from './components/PipelineFlow';
 import { PipelineRail } from './components/PipelineRail';
 import { InvoiceGrid } from './components/InvoiceGrid';
 import { InvoiceSelector } from './components/InvoiceSelector';
+import { PortfolioStats } from './components/PortfolioStats';
+import { PortfolioSweep } from './components/PortfolioSweep';
 import { ApprovalGate } from './components/ApprovalGate';
 import { AddInvoiceForm } from './components/AddInvoiceForm';
 import { useInView } from './useInView';
@@ -234,6 +236,7 @@ export const App: React.FC = () => {
             </span>
           }
         >
+          <PortfolioStats invoices={invoices} />
           <InvoiceGrid
             invoices={invoices}
             selectedInvoiceId={selectedInvoice?.invoice_id}
@@ -251,6 +254,7 @@ export const App: React.FC = () => {
               isMarkingPaid={isMarkingPaid}
             />
           </div>
+          <PortfolioSweep invoices={invoices} onSelectInvoice={handleSelectInvoice} />
         </Field>
 
         <Torn from="mint" to="coral" variant={2} />

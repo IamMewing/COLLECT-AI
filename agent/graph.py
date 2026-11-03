@@ -100,11 +100,25 @@ def run_sweep(invoice_task: str, client_name: str | None = None) -> GraphResult:
 
     if client_name and has_client_memory(client_name):
         mem = get_client_memory(client_name)
+        history = mem.get("interaction_history", [])
         mem_context = (
             f"\n\n[Persistent Client Memory for {client_name}]:\n"
             f"- Current Relationship Score: {mem.get('relationship_score', 70)}/100\n"
-            f"- Prior Interactions: {len(mem.get('interaction_history', []))} logged\n"
+            f"- Prior Interactions: {len(history)} logged\n"
         )
+        # The count alone tells the plan node nothing it can act on — it
+        # doesn't know whether a prior chase worked, what tone was already
+        # tried, or what last time's reflection said to do differently. Carry
+        # the most recent entries' substance, not just their number, so an
+        # account that's been chased before is actually reasoned about
+        # differently from one that hasn't — not just scored differently.
+        if history:
+            mem_context += "- Recent history (most recent last):\n"
+            for h in history[-3:]:
+                date = str(h.get("date", ""))[:10]
+                action = h.get("action", "unknown action")
+                outcome = h.get("outcome", "")
+                mem_context += f"    • {date} — {action}: {outcome}\n"
         invoice_task = invoice_task.strip() + mem_context
 
     graph = build_graph()

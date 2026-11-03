@@ -1,4 +1,4 @@
-import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError } from './types';
+import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioSweepResult } from './types';
 
 const API_BASE = '/api';
 
@@ -55,6 +55,16 @@ export async function runSweep(invoice?: Invoice): Promise<SweepResult> {
     body: JSON.stringify({ invoice }),
   });
   return handleResponse<SweepResult>(res);
+}
+
+/** Sweeps every open invoice at once, or just `invoiceIds` if given. */
+export async function sweepPortfolio(invoiceIds?: string[]): Promise<PortfolioSweepResult> {
+  const res = await fetch(`${API_BASE}/agent/sweep-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(invoiceIds && invoiceIds.length ? { invoice_ids: invoiceIds } : {}),
+  });
+  return handleResponse<PortfolioSweepResult>(res);
 }
 
 export async function approveAndExecute(params: {

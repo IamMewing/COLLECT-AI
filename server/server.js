@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const { runSweep, approveAndExecute, confirmPayment } = require('./agentService');
@@ -10,6 +11,15 @@ const store = require('./store');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Cloud Run sits behind Google's load balancer, which adds one hop to
+// X-Forwarded-For before the request reaches us — without this, express's
+// req.ip (and therefore express-rate-limit's default per-IP key) resolves
+// to the load balancer's address for every request, putting the whole
+// public demo behind a single shared rate-limit bucket instead of one per
+// visitor. `1` means "trust exactly one proxy hop," which matches Cloud
+// Run's setup; in local dev there's no proxy in front, so this is a no-op.
+app.set('trust proxy', 1);
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors());
@@ -30,6 +40,27 @@ app.use(
 // folder is missing rather than erroring.
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(CLIENT_DIST));
+
+// ── Rate limiting for the LLM-metered agent endpoints ───────────────────────
+// This is a public hackathon demo backed by a single shared GEMINI_API_KEY —
+// without a cap, one visitor hammering "Run the agent" (or a script doing it
+// for them) can burn through the key's quota or run up cost for everyone
+// else. Sweep, portfolio sweep, and approve all invoke the Python bridge
+// (and, in real mode, an actual Gemini call), so they share ONE limiter
+// instance — a budget across all three, not a separate one each, since
+// sweep-all alone can fire several LLM calls in a single request and
+// shouldn't be a way to route around a per-endpoint cap. Invoice CRUD and
+// reads aren't metered the same way and are left uncapped.
+const agentLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Too many requests',
+    details: 'This is a shared public demo — please wait a few minutes before running the agent again.',
+  },
+});
 
 /** Normalizes a statusMap entry, which may be the legacy plain string 'paid'
  * (from before `paid_via` tracking existed) or the current {status, via, at}
@@ -203,7 +234,7 @@ app.post('/api/agent/invoices', async (req, res) => {
  * Runs the risk assessment, probability forecast, and plan sweep for a given invoice.
  * Calls agent.mock_run_sweep() (or real agent.run_sweep()).
  */
-app.post('/api/agent/sweep', async (req, res) => {
+app.post('/api/agent/sweep', agentLimiter, async (req, res) => {
   try {
     const invoice = req.body?.invoice || SAMPLE_INVOICES[0];
     console.log(`\n🔍 [POST /api/agent/sweep] Running sweep for invoice ${invoice.invoice_id || 'unnamed'} (${invoice.client_name})`);
@@ -256,7 +287,7 @@ async function withConcurrency(items, limit, worker) {
  * demonstrating a receivables ops tool. Optional body: { invoice_ids: [...] }
  * to scope the sweep to a subset; omitted or empty means "everything open".
  */
-app.post('/api/agent/sweep-all', async (req, res) => {
+app.post('/api/agent/sweep-all', agentLimiter, async (req, res) => {
   try {
     const statusMap = await store.loadInvoiceStatus();
     const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
@@ -316,7 +347,7 @@ app.post('/api/agent/sweep-all', async (req, res) => {
  * Human-in-the-loop decision: Approve, Edit, or Reject a drafted message.
  * Calls agent.mock_approve_and_execute() (or real agent.approve_and_execute()).
  */
-app.post('/api/agent/approve', async (req, res) => {
+app.post('/api/agent/approve', agentLimiter, async (req, res) => {
   try {
     const { draft, approved, edited_body, client_name } = req.body || {};
     const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];

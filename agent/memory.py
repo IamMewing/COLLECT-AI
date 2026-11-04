@@ -1,12 +1,24 @@
 """Persistent client memory layer for CollectAI Strands Agent.
 
-Provides a JSON-file-backed store at agent/data/client_memory.json.
 Keyed by client name. Each record contains:
 - relationship_score (0-100)
 - preferred_tone (nullable)
 - interaction_history (list of {date, action, outcome})
 - total_invoices (int)
 - on_time_count (int)
+
+Storage backend: Firestore when FIRESTORE_ENABLED=true (survives Cloud Run
+cold starts and works correctly across multiple concurrent instances — a
+local JSON file does neither), otherwise a JSON file at
+agent/data/client_memory.json, same as before this existed. The flag
+defaults off so nothing changes for local dev or any deployment that hasn't
+set up a Firestore database yet; set it once Firestore is enabled on the
+GCP project and the Cloud Run service account has the Datastore User role.
+
+This file is the only place that talks to the storage backend — the rest
+of the module (get_client_memory, update_client_memory, etc.) just calls
+_load_client / _save_client and doesn't know or care which backend is
+behind them.
 """
 
 import json
@@ -18,6 +30,56 @@ from typing import Any
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 MEMORY_FILE = DATA_DIR / "client_memory.json"
+HISTORY_FILE = DATA_DIR / "message_history.json"
+
+FIRESTORE_ENABLED = os.environ.get("FIRESTORE_ENABLED", "false").strip().lower() in ("true", "1", "yes")
+
+# Lazily-initialized Firestore client + module handle. Both stay None when
+# FIRESTORE_ENABLED is off, or if init fails for any reason (missing
+# dependency, no credentials, Firestore not yet created on the project) —
+# in which case every function below transparently falls back to the local
+# JSON file, logged once here so a misconfiguration is visible in Cloud Run
+# logs rather than silently losing data with no explanation.
+_firestore = None
+_firestore_client = None
+if FIRESTORE_ENABLED:
+    try:
+        from google.cloud import firestore as _firestore  # noqa: N812
+
+        _firestore_client = _firestore.Client()
+        print("[MEMORY] FIRESTORE_ENABLED=true — using Firestore for client memory and message history.", flush=True)
+    except Exception as e:  # noqa: BLE001 - any init failure should degrade, not crash the bridge
+        print(
+            f"[MEMORY] FIRESTORE_ENABLED=true but Firestore client init failed ({e}). "
+            "Falling back to local JSON file — this will NOT survive a Cloud Run cold start.",
+            flush=True,
+        )
+        _firestore = None
+        _firestore_client = None
+
+_firestore_failure_logged = False
+
+
+def _disable_firestore(err: Exception) -> None:
+    """Called when a Firestore operation fails at RUNTIME (not at client
+    construction — that's the try/except above, which only catches a
+    synchronous failure and does NOT catch this one). `firestore.Client()`
+    is lazy: it never validates credentials/project-id until the first real
+    call, so a bad or missing config surfaces here, not up there. Once this
+    fires we turn Firestore off for the rest of the process so every
+    subsequent call goes straight to the local JSON fallback instead of
+    paying a failed-request's latency (and risking the same crash) on every
+    request for an already-known-broken backend."""
+    global _firestore_client
+    _firestore_client = None
+    global _firestore_failure_logged
+    if not _firestore_failure_logged:
+        _firestore_failure_logged = True
+        print(
+            f"[MEMORY] Firestore operation failed at runtime ({err}). "
+            "Falling back to local JSON file for the rest of this process's lifetime.",
+            flush=True,
+        )
 
 
 def _ensure_store_dir() -> None:
@@ -25,6 +87,7 @@ def _ensure_store_dir() -> None:
 
 
 def _load_store() -> dict[str, dict[str, Any]]:
+    """Local-JSON-fallback only: the whole client_memory.json file."""
     _ensure_store_dir()
     if not MEMORY_FILE.exists():
         return {}
@@ -37,6 +100,7 @@ def _load_store() -> dict[str, dict[str, Any]]:
 
 
 def _save_store(store: dict[str, dict[str, Any]]) -> None:
+    """Local-JSON-fallback only: rewrite the whole client_memory.json file."""
     _ensure_store_dir()
     temp_file = MEMORY_FILE.with_suffix(".tmp")
     with open(temp_file, "w", encoding="utf-8") as f:
@@ -44,12 +108,95 @@ def _save_store(store: dict[str, dict[str, Any]]) -> None:
     temp_file.replace(MEMORY_FILE)
 
 
+def _sanitize_doc_id(key: str) -> str:
+    """Firestore document IDs can't contain '/' (and a few other edge
+    cases) — client names are free text, so don't trust them verbatim."""
+    cleaned = key.strip().replace("/", "_")
+    return cleaned or "unknown-client"
+
+
+def _load_client(client_key: str) -> dict[str, Any] | None:
+    """One client's record, or None if it doesn't exist yet."""
+    if _firestore_client is not None:
+        try:
+            doc = _firestore_client.collection("client_memory").document(_sanitize_doc_id(client_key)).get()
+            return doc.to_dict() if doc.exists else None
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    return _load_store().get(client_key)
+
+
+def _save_client(client_key: str, record: dict[str, Any]) -> None:
+    if _firestore_client is not None:
+        try:
+            _firestore_client.collection("client_memory").document(_sanitize_doc_id(client_key)).set(record)
+            return
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    store = _load_store()
+    store[client_key] = record
+    _save_store(store)
+
+
+def record_message_history(entry: dict[str, Any]) -> None:
+    """Append one sent (or attempted) message to the durable activity log —
+    the audit trail of what the agent actually sent, to whom, and when, that
+    the UI's History panel reads from. Best-effort: a logging failure must
+    never break the approve flow, the same way a failed real-send already
+    falls back to a stub instead of raising (see execute.send_message)."""
+    record = {**entry, "timestamp": datetime.now(timezone.utc).isoformat()}
+    try:
+        if _firestore_client is not None:
+            try:
+                _firestore_client.collection("message_history").add(record)
+                return
+            except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+                _disable_firestore(e)
+        _ensure_store_dir()
+        history: list[dict[str, Any]] = []
+        if HISTORY_FILE.exists():
+            try:
+                history = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                history = []
+        history.append(record)
+        # Local-fallback only: cap so a long-running demo session's file
+        # doesn't grow unbounded. Firestore has no equivalent cap — querying
+        # it is always most-recent-first with a limit (see list_message_history).
+        history = history[-500:]
+        HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001 - logging a send must never break the send
+        print(f"[MEMORY] Warning: failed to record message history ({e}).", flush=True)
+
+
+def list_message_history(limit: int = 100) -> list[dict[str, Any]]:
+    """Most-recent-first list of sent messages, for the History UI."""
+    try:
+        if _firestore_client is not None:
+            try:
+                docs = (
+                    _firestore_client.collection("message_history")
+                    .order_by("timestamp", direction=_firestore.Query.DESCENDING)
+                    .limit(limit)
+                    .stream()
+                )
+                return [d.to_dict() for d in docs]
+            except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+                _disable_firestore(e)
+        if not HISTORY_FILE.exists():
+            return []
+        history = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        return list(reversed(history))[:limit]
+    except Exception as e:  # noqa: BLE001 - an unreadable log shouldn't 500 the page that shows it
+        print(f"[MEMORY] Warning: failed to list message history ({e}).", flush=True)
+        return []
+
+
 def has_client_memory(client_name: str) -> bool:
-    """Return True if a memory record already exists in the file for this client."""
+    """Return True if a memory record already exists for this client."""
     if not client_name:
         return False
-    store = _load_store()
-    return client_name.strip() in store
+    return _load_client(client_name.strip()) is not None
 
 
 # In-memory registry of invoice scores seen during sweeps to ensure
@@ -95,9 +242,9 @@ def get_client_memory(
         }
 
     client_key = client_name.strip()
-    store = _load_store()
-    if client_key in store:
-        return dict(store[client_key])
+    existing = _load_client(client_key)
+    if existing is not None:
+        return dict(existing)
 
     # Determine seed score from invoice dict, initial_score, or remembered sweep score
     seed = 70
@@ -144,13 +291,10 @@ def update_client_memory(
         client_name = "Default Client"
 
     client_key = client_name.strip()
-    store = _load_store()
-
-    if client_key not in store:
+    record = _load_client(client_key)
+    if record is None:
         # Seed new client record directly from the invoice's relationship_score
-        store[client_key] = get_client_memory(client_key, invoice=invoice, initial_score=initial_score)
-
-    record = store[client_key]
+        record = get_client_memory(client_key, invoice=invoice, initial_score=initial_score)
 
     # Extract suggested delta from reflection
     delta = 0
@@ -178,7 +322,7 @@ def update_client_memory(
         "outcome": outcome,
     })
 
-    _save_store(store)
+    _save_client(client_key, record)
     return record
 
 

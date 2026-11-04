@@ -19,6 +19,7 @@ from .memory import (
     has_client_memory,
     remember_invoice_score,
     extract_client_name_from_draft,
+    record_message_history,
 )
 
 
@@ -132,6 +133,8 @@ def mock_approve_and_execute(
 ) -> dict:
     """Mock version of execute.approve_and_execute — no send, no LLM reflection call."""
     c_name = client_name or extract_client_name_from_draft(draft)
+    recipient_email = (invoice or {}).get("email") if isinstance(invoice, dict) else None
+    invoice_id = (invoice or {}).get("invoice_id") if isinstance(invoice, dict) else None
 
     if not approved:
         # Deterministic mock rule (-1 on rejection by human reviewer).
@@ -143,9 +146,19 @@ def mock_approve_and_execute(
             suggested_relationship_delta=-1,
         )
         update_client_memory(c_name, reflection, action_taken="rejected_by_reviewer", invoice=invoice)
+        record_message_history({
+            "invoice_id": invoice_id,
+            "client_name": c_name,
+            "channel": draft.channel,
+            "subject": draft.subject,
+            "body": draft.body,
+            "recipient_email": recipient_email,
+            "status": "rejected",
+            "real_send": False,
+        })
         return {"status": "skipped", "reason": "rejected by human reviewer"}
 
-    print(f"[MOCK SEND via {draft.channel}] Subject: {draft.subject}")
+    print(f"[MOCK SEND via {draft.channel}] Subject: {draft.subject}" + (f" to {recipient_email}" if recipient_email else ""))
 
     # Deterministic mock rule (+2 for successful send).
     # Not real LLM reasoning — just a fixed, predictable mock delta so downstream
@@ -159,6 +172,17 @@ def mock_approve_and_execute(
     # Wire persistent client memory: update score and append to interaction history.
     # Seeds initial score from invoice dict if new client.
     update_client_memory(c_name, reflection, action_taken="approved_and_sent", invoice=invoice)
+
+    record_message_history({
+        "invoice_id": invoice_id,
+        "client_name": c_name,
+        "channel": draft.channel,
+        "subject": draft.subject,
+        "body": draft.body,
+        "recipient_email": recipient_email,
+        "status": "sent (mock)",
+        "real_send": False,
+    })
 
     return {"status": "sent (mock)", "reflection": reflection}
 

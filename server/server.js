@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const { runSweep, approveAndExecute, confirmPayment } = require('./agentService');
 const paypalService = require('./paypalService');
+const store = require('./store');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -29,75 +30,6 @@ app.use(
 // folder is missing rather than erroring.
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(CLIENT_DIST));
-
-// ── User-created invoices are persisted here (survives restarts) ─────────────
-const USER_INVOICES_PATH = path.join(__dirname, 'user_invoices.json');
-
-function loadUserInvoices() {
-  try {
-    if (fs.existsSync(USER_INVOICES_PATH)) {
-      return JSON.parse(fs.readFileSync(USER_INVOICES_PATH, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('Could not read user_invoices.json:', e.message);
-  }
-  return [];
-}
-
-function saveUserInvoices(list) {
-  fs.writeFileSync(USER_INVOICES_PATH, JSON.stringify(list, null, 2));
-}
-
-// ── Invoice status (paid/active) tracked separately by invoice_id, so it
-// applies uniformly to both curated SAMPLE_INVOICES and user-created ones ──
-const INVOICE_STATUS_PATH = path.join(__dirname, 'invoice_status.json');
-
-function loadInvoiceStatus() {
-  try {
-    if (fs.existsSync(INVOICE_STATUS_PATH)) {
-      return JSON.parse(fs.readFileSync(INVOICE_STATUS_PATH, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('Could not read invoice_status.json:', e.message);
-  }
-  return {};
-}
-
-function saveInvoiceStatus(map) {
-  fs.writeFileSync(INVOICE_STATUS_PATH, JSON.stringify(map, null, 2));
-}
-
-// ── PayPal order mapping: paypal_order_id -> { invoice_id, client_name } ────
-// This is how an incoming webhook (which only knows PayPal's order id)
-// finds its way back to our internal invoice record.
-const PAYPAL_ORDERS_PATH = path.join(__dirname, 'paypal_orders.json');
-
-function loadPaypalOrderMap() {
-  try {
-    if (fs.existsSync(PAYPAL_ORDERS_PATH)) {
-      return JSON.parse(fs.readFileSync(PAYPAL_ORDERS_PATH, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('Could not read paypal_orders.json:', e.message);
-  }
-  return {};
-}
-
-function savePaypalOrderMap(map) {
-  fs.writeFileSync(PAYPAL_ORDERS_PATH, JSON.stringify(map, null, 2));
-}
-
-/**
- * Marks an invoice paid and persists it — shared by the human "mark paid"
- * button and the PayPal webhook handler, so both paths behave identically.
- * Records *how* it was closed ('manual' vs 'paypal') so the UI can show the
- * closed-loop story, not just a flat paid/unpaid flag.
- */
-function markInvoicePaidInternal(invoiceId, via = 'manual') {
-  const statusMap = loadInvoiceStatus();
-  statusMap[invoiceId] = { status: 'paid', via, at: new Date().toISOString() };
-  saveInvoiceStatus(statusMap);
-}
 
 /** Normalizes a statusMap entry, which may be the legacy plain string 'paid'
  * (from before `paid_via` tracking existed) or the current {status, via, at}
@@ -175,11 +107,16 @@ app.get('/api/health', (req, res) => {
  * GET /api/agent/invoices
  * Returns curated samples plus any user-created invoices.
  */
-app.get('/api/agent/invoices', (req, res) => {
-  const userInvoices = loadUserInvoices();
-  const statusMap = loadInvoiceStatus();
-  const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
-  res.json({ invoices: [...userInvoices, ...SAMPLE_INVOICES].map(withStatus) });
+app.get('/api/agent/invoices', async (req, res) => {
+  try {
+    const userInvoices = await store.loadUserInvoices();
+    const statusMap = await store.loadInvoiceStatus();
+    const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
+    res.json({ invoices: [...userInvoices, ...SAMPLE_INVOICES].map(withStatus) });
+  } catch (error) {
+    console.error('❌ [GET /api/agent/invoices] Failed:', error);
+    res.status(500).json({ error: 'Failed to load invoices', details: error.message });
+  }
 });
 
 /**
@@ -189,14 +126,14 @@ app.get('/api/agent/invoices', (req, res) => {
  * curated sample invoices and user-created ones — status is tracked
  * separately by invoice_id, not baked into the invoice record itself.
  */
-app.post('/api/agent/invoices/:id/mark-paid', (req, res) => {
+app.post('/api/agent/invoices/:id/mark-paid', async (req, res) => {
   try {
     const { id } = req.params;
-    const allInvoices = [...loadUserInvoices(), ...SAMPLE_INVOICES];
+    const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
     if (!allInvoices.some((i) => i.invoice_id === id)) {
       return res.status(404).json({ error: 'Invoice not found', details: id });
     }
-    markInvoicePaidInternal(id);
+    await store.markInvoicePaid(id, 'manual');
     console.log(`\n✅ [POST /api/agent/invoices/${id}/mark-paid] Marked paid (manual).`);
     res.json({ invoice_id: id, status: 'paid' });
   } catch (error) {
@@ -209,7 +146,7 @@ app.post('/api/agent/invoices/:id/mark-paid', (req, res) => {
  * POST /api/agent/invoices
  * Create + persist a new invoice. Auto-derives a scenario label and defaults.
  */
-app.post('/api/agent/invoices', (req, res) => {
+app.post('/api/agent/invoices', async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.client_name || b.amount == null) {
@@ -218,8 +155,14 @@ app.post('/api/agent/invoices', (req, res) => {
         details: 'client_name and amount are required to create an invoice.',
       });
     }
+    if (b.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.email).trim())) {
+      return res.status(400).json({
+        error: 'Invalid email',
+        details: `"${b.email}" doesn't look like a valid email address.`,
+      });
+    }
 
-    const userInvoices = loadUserInvoices();
+    const userInvoices = await store.loadUserInvoices();
     const nextNum = 2000 + userInvoices.length + 1;
 
     const daysOverdue = Number(b.days_overdue) || 0;
@@ -238,10 +181,14 @@ app.post('/api/agent/invoices', (req, res) => {
       relationship_score: rel,
       historical_on_time_rate: b.historical_on_time_rate != null ? Number(b.historical_on_time_rate) : 0.8,
       scenario,
+      // Real contact address so a real-mode send can go to the actual
+      // client instead of the fixed DEMO_RECIPIENT_EMAIL fallback. Omitted
+      // (not an empty string) when not given, so downstream email-presence
+      // checks ("does this invoice have a real contact") stay simple.
+      ...(b.email ? { email: String(b.email).trim() } : {}),
     };
 
-    userInvoices.unshift(invoice);
-    saveUserInvoices(userInvoices);
+    await store.saveNewInvoice(invoice);
 
     console.log(`\n➕ [POST /api/agent/invoices] Created ${invoice.invoice_id} for ${invoice.client_name}`);
     res.status(201).json({ invoice });
@@ -311,9 +258,9 @@ async function withConcurrency(items, limit, worker) {
  */
 app.post('/api/agent/sweep-all', async (req, res) => {
   try {
-    const statusMap = loadInvoiceStatus();
+    const statusMap = await store.loadInvoiceStatus();
     const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
-    const all = [...loadUserInvoices(), ...SAMPLE_INVOICES].map(withStatus);
+    const all = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES].map(withStatus);
 
     const requestedIds = Array.isArray(req.body?.invoice_ids) ? new Set(req.body.invoice_ids) : null;
     const targets = all.filter((inv) => {
@@ -372,7 +319,7 @@ app.post('/api/agent/sweep-all', async (req, res) => {
 app.post('/api/agent/approve', async (req, res) => {
   try {
     const { draft, approved, edited_body, client_name } = req.body || {};
-    const allInvoices = [...loadUserInvoices(), ...SAMPLE_INVOICES];
+    const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
     const invoice = req.body?.invoice || allInvoices.find(i => (req.body?.invoice_id && i.invoice_id === req.body.invoice_id) || (client_name && i.client_name === client_name));
 
     if (!draft) {
@@ -410,9 +357,10 @@ app.post('/api/agent/approve', async (req, res) => {
         });
         paymentLink = ppResult.paymentLink;
 
-        const map = loadPaypalOrderMap();
-        map[ppResult.paypalOrderId] = { invoice_id: invoice.invoice_id, client_name: invoice.client_name };
-        savePaypalOrderMap(map);
+        await store.savePaypalOrderMapping(ppResult.paypalOrderId, {
+          invoice_id: invoice.invoice_id,
+          client_name: invoice.client_name,
+        });
 
         console.log(`💳 [PayPal] Sandbox order ${ppResult.paypalOrderId} created for ${invoice.invoice_id}. Link: ${paymentLink || '(pending)'}`);
       } catch (ppError) {
@@ -515,8 +463,7 @@ app.post('/api/paypal/webhook', async (req, res) => {
     }
 
     const ppOrderId = event.resource?.id;
-    const map = loadPaypalOrderMap();
-    const mapping = ppOrderId ? map[ppOrderId] : null;
+    const mapping = ppOrderId ? await store.getPaypalOrderMapping(ppOrderId) : null;
 
     if (!mapping) {
       console.warn(`⚠️  [PayPal webhook] No internal invoice mapped to PayPal order ${ppOrderId} — ignoring.`);
@@ -530,10 +477,10 @@ app.post('/api/paypal/webhook', async (req, res) => {
       return res.status(200).json({ received: true, mapped: true, captured: false, status: captureResult?.status });
     }
 
-    markInvoicePaidInternal(mapping.invoice_id, 'paypal');
+    await store.markInvoicePaid(mapping.invoice_id, 'paypal');
     console.log(`✅ [PayPal webhook] Order ${ppOrderId} captured — invoice ${mapping.invoice_id} (${mapping.client_name}) marked paid automatically.`);
 
-    const allInvoices = [...loadUserInvoices(), ...SAMPLE_INVOICES];
+    const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
     const invoice = allInvoices.find((i) => i.invoice_id === mapping.invoice_id) || null;
 
     const closeLoopResult = await confirmPayment(mapping.client_name, invoice);
@@ -545,6 +492,26 @@ app.post('/api/paypal/webhook', async (req, res) => {
     // fine since PayPal retries failed webhook deliveries automatically.
     console.error('❌ [PayPal webhook] Failed:', error);
     res.status(500).json({ error: 'Webhook handling failed', details: error.message });
+  }
+});
+
+/**
+ * GET /api/history
+ * The agent's activity log: every message it actually sent (or attempted,
+ * or was blocked from sending by a human reject) — who to, which invoice,
+ * channel, subject/body, whether it was a real send or a stub, and when.
+ * Written by the Python agent (agent/memory.py, record_message_history) on
+ * every approve/reject outcome in both mock and real mode; this endpoint
+ * just reads it back for the History panel. Optional ?limit=N (default 100).
+ */
+app.get('/api/history', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const entries = await store.listMessageHistory(limit);
+    res.json({ entries });
+  } catch (error) {
+    console.error('❌ [GET /api/history] Failed:', error);
+    res.status(500).json({ error: 'Failed to load message history', details: error.message });
   }
 });
 

@@ -3,4 +3,8 @@ strands-agents-tools
 anthropic
 google-genai
 pydantic>=2
+# Durable persistence for client memory, invoice state, and the sent-message
+# history log, used when FIRESTORE_ENABLED=true — see agent/memory.py. Local
+# JSON files remain the default so nothing requires GCP credentials locally.
+google-cloud-firestore>=2.19
 

@@ -85,6 +85,14 @@ def handle_sweep(payload: dict) -> dict:
         "relationship_score": int(invoice["relationship_score"]),
         "historical_on_time_rate": float(invoice["historical_on_time_rate"]),
     }
+    # Passed through as-is (no type coercion needed) so the frontend's later
+    # /api/agent/approve call — which sends back exactly this "invoice"
+    # sub-object from the sweep response — still has the client's real
+    # address. Without this, every approve ends up with recipient_email=None
+    # even when the invoice was created with one, because the sweep result
+    # is the invoice object the frontend has in hand by then.
+    if invoice.get("email"):
+        clean_invoice["email"] = str(invoice["email"])
 
     from agent.memory import get_client_memory, has_client_memory
 

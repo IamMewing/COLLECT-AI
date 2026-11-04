@@ -13,15 +13,21 @@ from email.mime.text import MIMEText
 
 from .agents import build_reflect_agent
 from .models import DraftedMessage, Reflection
-from .memory import update_client_memory, extract_client_name_from_draft
+from .memory import update_client_memory, extract_client_name_from_draft, record_message_history
 
 
-def send_message(message: DraftedMessage) -> dict:
+def send_message(message: DraftedMessage, recipient_email: str | None = None) -> dict:
     """Sends the drafted message for real if SEND_REAL_EMAIL=true and SMTP
     env vars are configured; otherwise falls back to the original
     print-only stub. This fallback is deliberate — if credentials are
     missing or misconfigured, the demo keeps working instead of crashing
     the approve flow.
+
+    Recipient priority: `recipient_email` (the invoice's own email, passed
+    in by approve_and_execute below) if set, otherwise DEMO_RECIPIENT_EMAIL
+    as a fallback — the curated sample invoices have no real client contact,
+    so there's nothing truthful to send "real" mail to for those; routing
+    them to your own inbox still proves the SMTP wiring works.
 
     Required env vars for real sending (channel == "email" only):
         SEND_REAL_EMAIL=true
@@ -29,8 +35,8 @@ def send_message(message: DraftedMessage) -> dict:
         SMTP_PORT      (default: 587)
         SMTP_USER      (the sending account, e.g. your Gmail address)
         SMTP_PASS      (an App Password — NOT your regular account password)
-        DEMO_RECIPIENT_EMAIL  (where it actually gets sent — use your own
-                               inbox, since demo client emails are fictional)
+        DEMO_RECIPIENT_EMAIL  (fallback recipient when an invoice has no
+                               email of its own — use your own inbox)
 
     WhatsApp is not wired to a real API — it still just logs.
     """
@@ -39,12 +45,13 @@ def send_message(message: DraftedMessage) -> dict:
     if real_send_requested and message.channel == "email":
         smtp_user = os.environ.get("SMTP_USER")
         smtp_pass = os.environ.get("SMTP_PASS")
-        recipient = os.environ.get("DEMO_RECIPIENT_EMAIL")
+        recipient = recipient_email or os.environ.get("DEMO_RECIPIENT_EMAIL")
 
         if not (smtp_user and smtp_pass and recipient):
             print(
                 "[SEND via email] SEND_REAL_EMAIL=true but SMTP_USER / SMTP_PASS / "
-                "DEMO_RECIPIENT_EMAIL are not all set — falling back to stub.",
+                "a recipient (invoice email or DEMO_RECIPIENT_EMAIL) are not all set — "
+                "falling back to stub.",
                 flush=True,
             )
         else:
@@ -70,7 +77,7 @@ def send_message(message: DraftedMessage) -> dict:
     # Stub path (default, or fallback on missing config / send failure)
     print(f"[SEND via {message.channel}] Subject: {message.subject}")
     print(message.body)
-    return {"status": "sent", "channel": message.channel, "real_send": False}
+    return {"status": "sent", "channel": message.channel, "real_send": False, "recipient": recipient_email}
 
 
 def approve_and_execute(
@@ -97,6 +104,8 @@ def approve_and_execute(
         'skipped' status if the human rejected the draft.
     """
     c_name = client_name or extract_client_name_from_draft(message)
+    recipient_email = (invoice or {}).get("email") or None
+    invoice_id = (invoice or {}).get("invoice_id")
 
     if not approved:
         reflection = Reflection(
@@ -111,12 +120,22 @@ def approve_and_execute(
             invoice=invoice,
             initial_score=initial_score,
         )
+        record_message_history({
+            "invoice_id": invoice_id,
+            "client_name": c_name,
+            "channel": message.channel,
+            "subject": message.subject,
+            "body": message.body,
+            "recipient_email": recipient_email,
+            "status": "rejected",
+            "real_send": False,
+        })
         return {"status": "skipped", "reason": "rejected by human reviewer"}
 
     if edited_body:
         message = message.model_copy(update={"body": edited_body})
 
-    send_result = send_message(message)
+    send_result = send_message(message, recipient_email=recipient_email)
 
     reflect_agent = build_reflect_agent()
     reflect_result = reflect_agent(
@@ -136,6 +155,17 @@ def approve_and_execute(
         invoice=invoice,
         initial_score=initial_score,
     )
+
+    record_message_history({
+        "invoice_id": invoice_id,
+        "client_name": c_name,
+        "channel": message.channel,
+        "subject": message.subject,
+        "body": message.body,
+        "recipient_email": send_result.get("recipient"),
+        "status": send_result.get("status"),
+        "real_send": send_result.get("real_send", False),
+    })
 
     return {"status": "sent", "send_result": send_result, "reflection": reflection}
 

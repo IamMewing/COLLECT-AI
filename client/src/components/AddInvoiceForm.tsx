@@ -10,6 +10,7 @@ interface AddInvoiceFormProps {
 
 export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreated }) => {
   const [clientName, setClientName] = useState('');
+  const [email, setEmail] = useState('');
   const [amount, setAmount] = useState('');
   const [daysOverdue, setDaysOverdue] = useState('0');
   const [ignoredReminders, setIgnoredReminders] = useState('0');
@@ -24,6 +25,10 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
       setFormError('Add a client name and an amount above zero.');
       return;
     }
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setFormError("That email doesn't look right — double-check it or leave it blank.");
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -34,6 +39,7 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
         ignored_reminders: Number(ignoredReminders) || 0,
         relationship_score: Math.min(100, Math.max(0, Number(standing) || 75)),
         historical_on_time_rate: Math.min(100, Math.max(0, Number(onTimeRate) || 80)) / 100,
+        ...(email.trim() ? { email: email.trim() } : {}),
       });
       onCreated(invoice);
     } catch (err: any) {
@@ -61,6 +67,18 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
               onChange={(e) => setClientName(e.target.value)}
               placeholder="Horizon Retail Pvt. Ltd."
             />
+          </div>
+
+          <div>
+            <label className="lbl" htmlFor="af-email">Their email (optional)</label>
+            <input
+              id="af-email" className="inp" type="email" value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="ap@client-company.com"
+            />
+            <p className="mono" style={{ color: 'var(--muted)', fontSize: '0.72rem', marginTop: 4 }}>
+              If you leave this blank, outreach for this invoice goes to the demo inbox instead of the real client.
+            </p>
           </div>
 
           <div>

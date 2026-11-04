@@ -1,4 +1,4 @@
-import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioSweepResult } from './types';
+import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioSweepResult, MessageHistoryEntry } from './types';
 
 const API_BASE = '/api';
 
@@ -31,6 +31,7 @@ export async function createInvoice(payload: {
   ignored_reminders?: number;
   relationship_score?: number;
   historical_on_time_rate?: number;
+  email?: string;
 }): Promise<Invoice> {
   const res = await fetch(`${API_BASE}/agent/invoices`, {
     method: 'POST',
@@ -85,6 +86,14 @@ export async function approveAndExecute(params: {
 export async function checkHealth(): Promise<{ status: string; service: string; mode: string }> {
   const res = await fetch(`${API_BASE}/health`);
   return handleResponse(res);
+}
+
+/** The agent's sent-message audit log — what it sent, to whom, and when
+ *  (most recent first), for the History panel. */
+export async function fetchMessageHistory(limit = 100): Promise<MessageHistoryEntry[]> {
+  const res = await fetch(`${API_BASE}/history?limit=${encodeURIComponent(String(limit))}`);
+  const data = await handleResponse<{ entries: MessageHistoryEntry[] }>(res);
+  return data.entries;
 }
 
 export async function checkPaypalStatus(): Promise<{

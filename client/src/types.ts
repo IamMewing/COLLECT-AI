@@ -12,6 +12,10 @@ export interface Invoice {
   relationship_score: number;
   historical_on_time_rate: number;
   scenario?: string;
+  /** The client's real email address, used as the send target instead of
+   * the fixed demo inbox when SEND_REAL_EMAIL is on. Optional — invoices
+   * without one (e.g. the curated sample set) still work exactly as before. */
+  email?: string;
   status?: 'active' | 'paid';
   /** How this invoice was closed, when status is 'paid': 'paypal' means a
    * real PayPal webhook confirmed payment automatically; 'manual' means a
@@ -101,4 +105,22 @@ export interface PortfolioSummary {
 export interface PortfolioSweepResult {
   results: PortfolioOutcome[];
   summary: PortfolioSummary;
+}
+
+/** One entry in the agent's sent-message audit log (GET /api/history) —
+ *  what was sent (or attempted), to whom, and what happened. Written by the
+ *  Python agent on every approve/reject, mock or real. */
+export interface MessageHistoryEntry {
+  invoice_id: string | null;
+  client_name: string;
+  channel: string;
+  subject: string;
+  body: string;
+  /** Null when the invoice had no email on file, or on a rejected draft. */
+  recipient_email?: string | null;
+  /** e.g. 'sent (mock)', 'sent', 'rejected'. */
+  status: string;
+  /** True only when SEND_REAL_EMAIL actually dispatched via SMTP. */
+  real_send: boolean;
+  timestamp: string;
 }

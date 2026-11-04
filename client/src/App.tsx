@@ -14,6 +14,7 @@ import { PortfolioStats } from './components/PortfolioStats';
 import { PortfolioSweep } from './components/PortfolioSweep';
 import { ApprovalGate } from './components/ApprovalGate';
 import { AddInvoiceForm } from './components/AddInvoiceForm';
+import { AgentHistory } from './components/AgentHistory';
 import { useInView } from './useInView';
 import { X } from 'lucide-react';
 
@@ -67,6 +68,7 @@ export const App: React.FC = () => {
   const [showAddInvoice, setShowAddInvoice] = useState(false);
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
   const [paypalConfigured, setPaypalConfigured] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
     checkPaypalStatus()
@@ -160,6 +162,7 @@ export const App: React.FC = () => {
         invoice: selectedInvoice || undefined,
       });
       setApproveResult(outcome);
+      setHistoryRefreshKey((k) => k + 1);
       await loadInvoices();
     } catch (err: any) {
       console.error('Approval failed:', err);
@@ -184,6 +187,7 @@ export const App: React.FC = () => {
         invoice: selectedInvoice || undefined,
       });
       setApproveResult(outcome);
+      setHistoryRefreshKey((k) => k + 1);
     } catch (err: any) {
       console.error('Rejection failed:', err);
       setError({
@@ -299,7 +303,17 @@ export const App: React.FC = () => {
           />
         </Field>
 
-        <Torn from="coral" to="ink" variant={0} />
+        <Torn from="coral" to="mint" variant={1} />
+        <Field
+          id="history"
+          tone="mint"
+          marker="The record"
+          statement="Every message it sent, and who got it"
+        >
+          <AgentHistory refreshKey={historyRefreshKey} />
+        </Field>
+
+        <Torn from="mint" to="ink" variant={2} />
         <footer className="field field--ink field--tight" data-field="ink">
           <div className="wrap">
             <h2 className="mega" style={{ marginBottom: 'clamp(28px, 4vw, 56px)' }}>Get paid.</h2>

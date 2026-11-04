@@ -35,6 +35,7 @@ agent/
 ├── agents.py         Per-node Agent definitions (model, tools, prompts)
 ├── graph.py          The actual strands.multiagent.Graph wiring
 └── execute.py        Phase 2: approve → send → reflect (post-graph)
+tests/                 pytest suite — risk/probability/branch logic, client memory
 run_demo.py           End-to-end runnable example
 smoke_test.py         Verifies everything imports/builds without a real API key
 requirements.txt
@@ -58,6 +59,26 @@ This proves the pure-Python risk/probability logic is correct and
 that the Graph/Agents construct without error — useful for iterating
 fast without burning API credits, and exactly what to run again the
 moment your Bedrock access clears (just swap the model, see below).
+
+## Run the test suite
+
+```bash
+pip install pytest
+pytest
+```
+
+`tests/` covers the deterministic, model-free parts of the agent in
+detail — `calculate_risk_score` and `predict_payment_probability`
+(every per-factor cap, every category boundary, on both sides), the
+plan/branch decision in mock mode (no_action / standard / escalation,
+including the cases where risk and probability pull in opposite
+directions), and the client-memory layer (score clamping, seeding a
+new client from the invoice, message-history ordering). No API key
+and no network calls — these run in under two seconds. A
+`conftest.py` fixture points every test's memory/history files at a
+throwaway temp directory, so running the suite never touches
+`agent/data/*.json` (the files the actual running demo reads and
+writes).
 
 ## Run it with zero cost — mock mode
 

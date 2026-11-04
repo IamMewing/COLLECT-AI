@@ -2,6 +2,15 @@ import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, Por
 
 const API_BASE = '/api';
 
+/** Every call goes through this so the session cookie (the shared-password
+ *  gate, see auth.js) is always sent/received — same-origin requests do
+ *  this by default, but local dev runs the client on a different port than
+ *  the API, where fetch's default credentials mode ('same-origin') would
+ *  silently drop the cookie. 'include' makes both cases work identically. */
+function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, { ...init, credentials: 'include' });
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errBody: ApiError;
@@ -13,13 +22,13 @@ async function handleResponse<T>(res: Response): Promise<T> {
         details: res.statusText,
       };
     }
-    throw errBody;
+    throw { ...errBody, status: res.status };
   }
   return res.json();
 }
 
 export async function fetchInvoices(): Promise<Invoice[]> {
-  const res = await fetch(`${API_BASE}/agent/invoices`);
+  const res = await apiFetch('/agent/invoices');
   const data = await handleResponse<{ invoices: Invoice[] }>(res);
   return data.invoices;
 }
@@ -33,7 +42,7 @@ export async function createInvoice(payload: {
   historical_on_time_rate?: number;
   email?: string;
 }): Promise<Invoice> {
-  const res = await fetch(`${API_BASE}/agent/invoices`, {
+  const res = await apiFetch('/agent/invoices', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -54,7 +63,7 @@ export interface ImportInvoicesResult {
  *  fail while others are saved. See server/csvImport.js for the expected
  *  columns. */
 export async function importInvoicesCsv(csvText: string): Promise<ImportInvoicesResult> {
-  const res = await fetch(`${API_BASE}/agent/invoices/import`, {
+  const res = await apiFetch('/agent/invoices/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ csv: csvText }),
@@ -63,14 +72,14 @@ export async function importInvoicesCsv(csvText: string): Promise<ImportInvoices
 }
 
 export async function markInvoicePaid(invoiceId: string): Promise<{ invoice_id: string; status: 'paid' }> {
-  const res = await fetch(`${API_BASE}/agent/invoices/${encodeURIComponent(invoiceId)}/mark-paid`, {
+  const res = await apiFetch(`/agent/invoices/${encodeURIComponent(invoiceId)}/mark-paid`, {
     method: 'POST',
   });
   return handleResponse(res);
 }
 
 export async function runSweep(invoice?: Invoice): Promise<SweepResult> {
-  const res = await fetch(`${API_BASE}/agent/sweep`, {
+  const res = await apiFetch('/agent/sweep', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ invoice }),
@@ -80,7 +89,7 @@ export async function runSweep(invoice?: Invoice): Promise<SweepResult> {
 
 /** Sweeps every open invoice at once, or just `invoiceIds` if given. */
 export async function sweepPortfolio(invoiceIds?: string[]): Promise<PortfolioSweepResult> {
-  const res = await fetch(`${API_BASE}/agent/sweep-all`, {
+  const res = await apiFetch('/agent/sweep-all', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(invoiceIds && invoiceIds.length ? { invoice_ids: invoiceIds } : {}),
@@ -95,7 +104,7 @@ export async function approveAndExecute(params: {
   client_name?: string;
   invoice?: Invoice;
 }): Promise<ApproveResult> {
-  const res = await fetch(`${API_BASE}/agent/approve`, {
+  const res = await apiFetch('/agent/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -104,14 +113,14 @@ export async function approveAndExecute(params: {
 }
 
 export async function checkHealth(): Promise<{ status: string; service: string; mode: string }> {
-  const res = await fetch(`${API_BASE}/health`);
+  const res = await apiFetch('/health');
   return handleResponse(res);
 }
 
 /** The agent's sent-message audit log — what it sent, to whom, and when
  *  (most recent first), for the History panel. */
 export async function fetchMessageHistory(limit = 100): Promise<MessageHistoryEntry[]> {
-  const res = await fetch(`${API_BASE}/history?limit=${encodeURIComponent(String(limit))}`);
+  const res = await apiFetch(`/history?limit=${encodeURIComponent(String(limit))}`);
   const data = await handleResponse<{ entries: MessageHistoryEntry[] }>(res);
   return data.entries;
 }
@@ -121,6 +130,29 @@ export async function checkPaypalStatus(): Promise<{
   environment: string;
   webhook_configured: boolean;
 }> {
-  const res = await fetch(`${API_BASE}/paypal/status`);
+  const res = await apiFetch('/paypal/status');
+  return handleResponse(res);
+}
+
+// ── Shared-password gate ────────────────────────────────────────────────────
+// See server/auth.js. `required` is false when ACCESS_PASSWORD isn't set on
+// the server at all — local dev and any deployment that hasn't opted in.
+
+export async function fetchAuthStatus(): Promise<{ required: boolean; authenticated: boolean }> {
+  const res = await apiFetch('/auth/status');
+  return handleResponse(res);
+}
+
+export async function login(password: string): Promise<{ authenticated: boolean }> {
+  const res = await apiFetch('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  return handleResponse(res);
+}
+
+export async function logout(): Promise<{ authenticated: boolean }> {
+  const res = await apiFetch('/auth/logout', { method: 'POST' });
   return handleResponse(res);
 }

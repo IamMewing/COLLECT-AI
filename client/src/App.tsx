@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioOutcome } from './types';
-import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, checkPaypalStatus } from './api';
+import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, checkPaypalStatus, fetchAuthStatus } from './api';
+import { PasswordGate } from './components/PasswordGate';
 import { Boot } from './components/Boot';
 import { LiquidBlobs } from './components/LiquidBlobs';
 import { Nav } from './components/Nav';
@@ -69,12 +70,25 @@ export const App: React.FC = () => {
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
   const [paypalConfigured, setPaypalConfigured] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  // 'checking' avoids a flash of either the lock screen or the real app
+  // before we know which one is correct. If the status check itself fails
+  // (server unreachable), falls open to 'unlocked' — a password gate that's
+  // down shouldn't also take the whole demo down with it; the actual data
+  // is still protected server-side by auth.requireAuth regardless.
+  const [authState, setAuthState] = useState<'checking' | 'locked' | 'unlocked'>('checking');
 
   useEffect(() => {
+    fetchAuthStatus()
+      .then((s) => setAuthState(!s.required || s.authenticated ? 'unlocked' : 'locked'))
+      .catch(() => setAuthState('unlocked'));
+  }, []);
+
+  useEffect(() => {
+    if (authState !== 'unlocked') return;
     checkPaypalStatus()
       .then((s) => setPaypalConfigured(s.configured))
       .catch(() => setPaypalConfigured(false));
-  }, []);
+  }, [authState]);
 
   const loadInvoices = useCallback(async () => {
     try {
@@ -92,7 +106,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { loadInvoices(); }, [loadInvoices]);
+  useEffect(() => { if (authState === 'unlocked') loadInvoices(); }, [loadInvoices, authState]);
 
   const handleSelectInvoice = (inv: Invoice) => {
     setSelectedInvoice(inv);
@@ -225,6 +239,17 @@ export const App: React.FC = () => {
       setIsMarkingPaid(false);
     }
   };
+
+  if (authState === 'checking') {
+    // Deliberately blank rather than a spinner — this resolves in one fast
+    // same-origin request, and a spinner that appears for a few dozen
+    // milliseconds reads as more of a flash than a loading state.
+    return <div className="field--ink" style={{ position: 'fixed', inset: 0 }} />;
+  }
+
+  if (authState === 'locked') {
+    return <PasswordGate onUnlocked={() => setAuthState('unlocked')} />;
+  }
 
   return (
     <>

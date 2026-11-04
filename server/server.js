@@ -9,6 +9,7 @@ const { runSweep, approveAndExecute, confirmPayment } = require('./agentService'
 const paypalService = require('./paypalService');
 const store = require('./store');
 const { parseInvoiceCsv } = require('./csvImport');
+const auth = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,7 +24,12 @@ const PORT = process.env.PORT || 3001;
 app.set('trust proxy', 1);
 
 // ── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors());
+// `credentials: true` + reflecting the request's own Origin (rather than
+// `*`, which the CORS spec disallows once credentials are involved) is what
+// lets the session cookie (the password gate, see auth.js) survive local
+// dev, where the Vite client (:5173) and this API (:3001) are different
+// origins. In production they're the same origin and this is a no-op.
+app.use(cors({ origin: true, credentials: true }));
 // `verify` stashes the raw request body alongside the parsed JSON — needed
 // because PayPal webhook signature verification must hash the exact bytes
 // PayPal sent, not a re-serialized copy of req.body.
@@ -138,6 +144,51 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// ── Shared-password gate ─────────────────────────────────────────────────────
+// Everything below this point except the PayPal webhook (which real PayPal
+// servers call with no browser, no cookie, and no way to type a password)
+// and the SPA's own static files (so the React app can load far enough to
+// show the password prompt in the first place) requires a valid session.
+// See server/auth.js — the whole gate no-ops when ACCESS_PASSWORD isn't set.
+
+app.get('/api/auth/status', (req, res) => {
+  res.json({ required: auth.AUTH_ENABLED, authenticated: auth.isAuthenticated(req) });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  if (!auth.AUTH_ENABLED) {
+    return res.json({ authenticated: true });
+  }
+  const { password } = req.body || {};
+  if (!auth.checkPassword(password)) {
+    return res.status(401).json({ error: 'Wrong password', details: 'That password doesn’t match.' });
+  }
+  res.cookie(auth.COOKIE_NAME, auth.makeSessionCookieValue(), {
+    httpOnly: true,
+    sameSite: 'lax',
+    // Cloud Run terminates TLS in front of the container and sets K_SERVICE
+    // on every revision, so this is true in production without needing a
+    // separate NODE_ENV=production setting, and false in local http dev
+    // (a Secure cookie is silently dropped by the browser over plain http).
+    secure: Boolean(process.env.K_SERVICE),
+    maxAge: auth.SESSION_TTL_MS,
+  });
+  res.json({ authenticated: true });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie(auth.COOKIE_NAME);
+  res.json({ authenticated: false });
+});
+
+// Gates every /api/agent/* and /api/history route defined below this line,
+// plus /api/paypal/status — registered as path-prefix middleware so each
+// route doesn't need auth.requireAuth added individually (and can't be
+// accidentally left off a new one later). Must stay ABOVE those route
+// definitions; Express middleware only applies to routes registered after it.
+app.use('/api/agent', auth.requireAuth);
+app.use('/api/history', auth.requireAuth);
 
 /**
  * GET /api/agent/invoices
@@ -490,7 +541,7 @@ app.post('/api/agent/approve', agentLimiter, async (req, res) => {
  * Lets the UI show whether PayPal is actually wired up (and in what mode),
  * instead of silently falling back to stubbed sends.
  */
-app.get('/api/paypal/status', (req, res) => {
+app.get('/api/paypal/status', auth.requireAuth, (req, res) => {
   res.json({
     configured: paypalService.isConfigured(),
     environment: (process.env.PAYPAL_ENV || 'sandbox').toLowerCase(),

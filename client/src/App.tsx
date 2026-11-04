@@ -281,6 +281,7 @@ export const App: React.FC = () => {
               onAddInvoice={() => setShowAddInvoice(true)}
               onMarkPaid={handleMarkPaid}
               isMarkingPaid={isMarkingPaid}
+              onInvoicesImported={loadInvoices}
             />
           </div>
           <PortfolioSweep invoices={invoices} onOpen={handleOpenPortfolioResult} />

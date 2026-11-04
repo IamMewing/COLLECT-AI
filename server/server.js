@@ -8,6 +8,7 @@ require('dotenv').config();
 const { runSweep, approveAndExecute, confirmPayment } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
+const { parseInvoiceCsv } = require('./csvImport');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,6 +29,10 @@ app.use(cors());
 // PayPal sent, not a re-serialized copy of req.body.
 app.use(
   express.json({
+    // Default is 100kb, which a CSV invoice import can plausibly exceed
+    // (a few hundred rows with long client names) well before it's
+    // anywhere near an actually unreasonable upload.
+    limit: '2mb',
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
@@ -226,6 +231,69 @@ app.post('/api/agent/invoices', async (req, res) => {
   } catch (error) {
     console.error('❌ [POST /api/agent/invoices] Failed:', error);
     res.status(500).json({ error: 'Failed to create invoice', details: error.message });
+  }
+});
+
+/**
+ * POST /api/agent/invoices/import
+ * Bulk-creates invoices from CSV text (body: { csv: string }). Partial
+ * success is the expected outcome, not an error case — a 200-row import
+ * with three typos in it should save the other 197 and report exactly
+ * which rows failed and why, not reject the whole batch. See csvImport.js
+ * for the column format and per-row validation rules (the same rules
+ * POST /api/agent/invoices applies to a single manual create).
+ */
+app.post('/api/agent/invoices/import', async (req, res) => {
+  try {
+    const csvText = req.body?.csv;
+    if (typeof csvText !== 'string' || !csvText.trim()) {
+      return res.status(400).json({ error: 'Missing CSV', details: 'Expected { csv: "<file contents>" } in the request body.' });
+    }
+
+    const { invoices: parsedInvoices, errors, warnings } = parseInvoiceCsv(csvText);
+
+    if (parsedInvoices.length === 0) {
+      return res.status(400).json({ error: 'Nothing to import', details: 'No valid rows were found.', errors, warnings });
+    }
+
+    const userInvoices = await store.loadUserInvoices();
+    let nextNum = 2000 + userInvoices.length + 1;
+    const created = [];
+
+    for (const parsed of parsedInvoices) {
+      const daysOverdue = parsed.days_overdue;
+      const scenario =
+        daysOverdue > 30 ? 'High Risk Escalation (Firm Draft Expected)'
+        : daysOverdue > 10 ? 'Moderate Risk (Friendly Reminder Expected)'
+        : 'Low Risk (Agent May Choose No Action)';
+
+      const invoice = {
+        ...parsed,
+        invoice_id: parsed.invoice_id || `INV-${nextNum}`,
+        scenario,
+      };
+      if (!parsed.invoice_id) nextNum += 1;
+
+      // Sequential, not Promise.all: keeps the INV-#### numbering strictly
+      // in file order (matches how a person reading the CSV top-to-bottom
+      // would expect rows to be numbered) and, more importantly, avoids a
+      // burst of concurrent writes to the same local JSON file racing each
+      // other — the local fallback path is read-modify-write-the-whole-
+      // file, not a per-document write like Firestore.
+      await store.saveNewInvoice(invoice);
+      created.push(invoice);
+    }
+
+    console.log(`\n📥 [POST /api/agent/invoices/import] Imported ${created.length} invoice(s), ${errors.length} row error(s).`);
+    res.status(created.length > 0 ? 201 : 400).json({
+      created,
+      created_count: created.length,
+      errors,
+      warnings,
+    });
+  } catch (error) {
+    console.error('❌ [POST /api/agent/invoices/import] Failed:', error);
+    res.status(500).json({ error: 'Failed to import invoices', details: error.message });
   }
 });
 

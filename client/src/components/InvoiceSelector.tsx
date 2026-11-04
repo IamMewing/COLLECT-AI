@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Invoice } from '../types';
 import { Check, Plus, Zap } from 'lucide-react';
+import { ImportCsvButton } from './ImportCsvButton';
 
 interface InvoiceSelectorProps {
   invoices: Invoice[];
@@ -11,6 +12,9 @@ interface InvoiceSelectorProps {
   onAddInvoice?: () => void;
   onMarkPaid?: (inv: Invoice) => void;
   isMarkingPaid?: boolean;
+  /** Called after a CSV import saves at least one row, so the parent can
+   *  refetch the ledger. Omitted entirely hides the Import CSV button. */
+  onInvoicesImported?: () => void;
 }
 
 const inr = (n: number) => '₹' + n.toLocaleString('en-IN');
@@ -18,7 +22,7 @@ const short = (n: number) => (n >= 1000 ? '₹' + Math.round(n / 1000) + 'k' : '
 
 export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
   invoices, selectedInvoice, onSelectInvoice, onRunSweep,
-  isSweeping, onAddInvoice, onMarkPaid, isMarkingPaid,
+  isSweeping, onAddInvoice, onMarkPaid, isMarkingPaid, onInvoicesImported,
 }) => {
   if (!selectedInvoice) return null;
   const inv = selectedInvoice;
@@ -35,11 +39,14 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
         }}
       >
         <span className="marker">Pick an account</span>
-        {onAddInvoice && (
-          <button type="button" className="pill pill--sm" onClick={onAddInvoice}>
-            <Plus size={13} /> New invoice
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {onInvoicesImported && <ImportCsvButton onImported={onInvoicesImported} />}
+          {onAddInvoice && (
+            <button type="button" className="pill pill--sm" onClick={onAddInvoice}>
+              <Plus size={13} /> New invoice
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 'clamp(28px, 4vw, 48px)' }}>

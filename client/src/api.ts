@@ -42,6 +42,26 @@ export async function createInvoice(payload: {
   return data.invoice;
 }
 
+export interface ImportInvoicesResult {
+  created: Invoice[];
+  created_count: number;
+  errors: { row: number; error: string }[];
+  warnings?: string[];
+}
+
+/** Bulk-creates invoices from a CSV file's raw text. Partial success is
+ *  normal — check `errors` even on a 2xx response, since some rows can
+ *  fail while others are saved. See server/csvImport.js for the expected
+ *  columns. */
+export async function importInvoicesCsv(csvText: string): Promise<ImportInvoicesResult> {
+  const res = await fetch(`${API_BASE}/agent/invoices/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csv: csvText }),
+  });
+  return handleResponse<ImportInvoicesResult>(res);
+}
+
 export async function markInvoicePaid(invoiceId: string): Promise<{ invoice_id: string; status: 'paid' }> {
   const res = await fetch(`${API_BASE}/agent/invoices/${encodeURIComponent(invoiceId)}/mark-paid`, {
     method: 'POST',

@@ -1,4 +1,4 @@
-import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioSweepResult, MessageHistoryEntry, NegotiationState } from './types';
+import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioSweepResult, MessageHistoryEntry, NegotiationState, CallTriggerResult } from './types';
 
 const API_BASE = '/api';
 
@@ -176,5 +176,16 @@ export async function login(password: string): Promise<{ authenticated: boolean 
 
 export async function logout(): Promise<{ authenticated: boolean }> {
   const res = await apiFetch('/auth/logout', { method: 'POST' });
+  return handleResponse(res);
+}
+
+/** Places a real outbound AI voice call to this invoice's client (Phase 5) —
+ *  the call itself unfolds over actual phone minutes after this returns, so
+ *  this only confirms Twilio accepted the request. Watch NegotiationsPanel
+ *  (channel: 'phone') for the conversation as it happens. */
+export async function triggerVoiceCall(invoiceId: string): Promise<CallTriggerResult> {
+  const res = await apiFetch(`/agent/invoices/${encodeURIComponent(invoiceId)}/call`, {
+    method: 'POST',
+  });
   return handleResponse(res);
 }

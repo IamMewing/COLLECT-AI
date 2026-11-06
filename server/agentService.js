@@ -214,6 +214,21 @@ async function handleIncomingText(fromPhone, body, channel) {
   return callAgentBridge('incoming_text', { from_phone: fromPhone, body, channel });
 }
 
+/**
+ * Called by BOTH of server.js's Twilio Voice webhooks — POST /api/twilio/voice
+ * (the call just connected, transcript=null) and POST /api/twilio/voice/gather
+ * (Twilio's speech-to-text of what the client just said). Decides what the
+ * agent should say next and whether to keep listening or hang up.
+ *
+ * @param {string} invoiceId
+ * @param {string|null} transcript - null on the call's opening turn.
+ * @param {object|null} invoice - clean invoice dict (server.js looks this up
+ *   from the store by invoiceId, since Twilio's payload carries no invoice data).
+ */
+async function handleVoiceTurn(invoiceId, transcript, invoice = null) {
+  return callAgentBridge('voice_turn', { invoice_id: invoiceId, transcript, invoice });
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
@@ -222,4 +237,5 @@ module.exports = {
   confirmInstallmentPaid,
   getNegotiationState,
   handleIncomingText,
+  handleVoiceTurn,
 };

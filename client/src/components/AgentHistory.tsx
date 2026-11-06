@@ -25,6 +25,7 @@ const timeAgo = (iso: string): string => {
 const channelLabel = (channel: string): string => {
   if (channel === 'whatsapp') return 'WhatsApp';
   if (channel === 'sms') return 'SMS';
+  if (channel === 'phone') return 'phone call';
   return 'email';
 };
 

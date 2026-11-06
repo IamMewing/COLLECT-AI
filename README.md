@@ -134,6 +134,67 @@ else) — like PayPal and real email, this degrades gracefully when
 unconfigured: `GET /api/twilio/status` reports the current state, and
 outreach just stays on whichever channels **are** configured.
 
+## AI voice calls
+
+The fourth channel, and the one that can't just queue a reply for later —
+a live phone call is happening in real time, so whatever the agent decides
+to say has to come back from one HTTP request fast enough to keep the
+conversation going. `POST /api/agent/invoices/:id/call` places a real
+outbound call via Twilio (verified against the installed `twilio` v9.13.0
+Python/Node SDKs, same discipline as the rest of this project) to whichever
+button a human clicks "Call them" on — the call itself is driven entirely
+by Twilio re-fetching TwiML from this server turn by turn, not by anything
+held open server-side:
+
+1. **`POST /api/twilio/voice`** — Twilio fetches this the instant the
+   client picks up. The agent doesn't know anything's been said yet
+   (there's nothing to react to), so this is framed as the agent's own
+   opening turn: introduce yourself, state why you're calling, stop.
+2. **`<Gather input="speech">`** — Twilio's own built-in speech-to-text
+   transcribes whatever the client says next; no separate STT/TTS service
+   needed, Twilio's `<Say>`/`<Gather>` verbs do both ends of that for free.
+3. **`POST /api/twilio/voice/gather`** — receives the transcript, asks the
+   same negotiation logic email/WhatsApp/SMS replies use what happens next,
+   and speaks the answer. `actionOnEmptyResult="true"` means even silence
+   routes back through this one webhook (confirmed against Twilio's own
+   docs — without it, a silent Gather just falls through to the next TwiML
+   verb and never calls back at all) so there's a single place that decides
+   what a silent turn means: one re-prompt, then a graceful hang-up,
+   without spending any of the call's turn budget or an LLM call on dead
+   air.
+
+Reusing the existing negotiate agent (not a separate one) was the point,
+not a shortcut — `agent/execute.py`'s `handle_voice_turn` builds the same
+full conversation thread used for text replies and hands it to the exact
+same `build_negotiate_agent()`, so a client who gets called about an
+invoice they were already emailed about has the agent reference that
+history naturally, and a client who negotiates a payment plan over the
+phone gets the exact same real PayPal order/multi-installment tracking a
+negotiated email reply would produce. Only the *style* differs, via
+phone-specific prompt instructions: 1-3 short spoken sentences, no
+markdown, and — this is the constraint that actually shaped the
+implementation — **never read a URL out loud**. A spoken link is unusable,
+so the moment the agent mints a payment link mid-call, Python fires a real
+text with that link (reusing Phase 4's `send_text_message`) instead of
+speaking it, and the agent's spoken line says "I'll text that to you right
+now" — a promise the system keeps automatically rather than one the LLM
+just happens to say. Every turn — agent and client, however many channels
+a thread has crossed — lands in the exact same conversation record
+(`channel: "phone"`) the "Still talking it out" panel already renders, so
+a live call shows up right alongside email/WhatsApp/SMS threads with zero
+UI-side special-casing.
+
+A call is capped at `MAX_VOICE_TURNS` (6) agent turns, after which it wraps
+up and hangs up regardless of where the conversation was — a client who
+just keeps talking shouldn't be able to run up an unbounded number of LLM
+calls on one phone call. Like every other real-send path here, this
+degrades gracefully with Twilio unconfigured: `POST /api/agent/invoices/:id/call`
+returns a `stubbed` result instead of erroring, and `GET /api/twilio/status`'s
+`voice_call_configured` tells the UI which case to expect. Voice calls
+reuse the same `TWILIO_SMS_FROM` number as the caller ID — one Twilio
+number handles SMS and Voice by default, so there's no separate number to
+provision.
+
 ## What's here
 
 ```
@@ -266,9 +327,10 @@ without a rewrite.
 
 ## What's intentionally not here yet
 
-- **AI voice calls** — the next planned channel (a stretch goal beyond
-  WhatsApp/SMS): an outbound call that can actually hold a short
-  negotiation conversation, not just play a recording.
+- **Inbound voice calls** — only outbound is wired up (a human clicks "Call
+  them"); a client calling the demo number back would need its own TwiML
+  entry point. Reasonable for a collections agent that initiates contact,
+  but worth naming as a gap rather than an oversight.
 - **Business-initiated WhatsApp templates** — Meta requires a
   pre-approved message template for any WhatsApp send that doesn't fall
   inside the client's 24-hour reply window (see "WhatsApp & SMS" above).

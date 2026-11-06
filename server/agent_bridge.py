@@ -306,6 +306,34 @@ def handle_incoming_text(payload: dict) -> dict:
     return _handle_incoming_text(from_phone, body, channel)
 
 
+def handle_voice_turn(payload: dict) -> dict:
+    """Triggered by BOTH of server.js's Twilio Voice webhooks — POST
+    /api/twilio/voice (the call just connected; transcript is None) and
+    POST /api/twilio/voice/gather (Twilio's speech-to-text of what the
+    client just said; transcript is that text, possibly ''). Decides what
+    the agent should say next and whether to keep listening or hang up —
+    see agent/execute.py's handle_voice_turn / agent/mock.py's
+    mock_handle_voice_turn. 'invoice' is the same clean invoice dict shape
+    handle_sweep builds (server.js looks it up from the store by invoice_id
+    on every voice webhook call, since Twilio's own payload only carries
+    the invoice_id query param, not invoice data)."""
+    invoice_id = payload.get("invoice_id")
+    transcript = payload.get("transcript")
+    invoice = payload.get("invoice")
+    if not invoice_id:
+        raise ValueError("Missing 'invoice_id' in voice_turn payload")
+
+    # Same local-aliased-import reasoning as handle_incoming_text above:
+    # this bridge function shares its name with the agent package's
+    # top-level export, so the import is aliased to avoid shadowing it.
+    if USE_MOCK:
+        from agent import mock_handle_voice_turn as _handle_voice_turn
+    else:
+        from agent import handle_voice_turn as _handle_voice_turn
+
+    return _handle_voice_turn(invoice_id, transcript, invoice)
+
+
 def handle_negotiation_state(payload: dict) -> dict:
     """Read-only snapshot for the UI's negotiation panel: every tracked
     conversation thread and payment plan, regardless of status. Unlike
@@ -345,13 +373,15 @@ def main():
                 res = handle_installment_paid(payload)
             elif action == "incoming_text":
                 res = handle_incoming_text(payload)
+            elif action == "voice_turn":
+                res = handle_voice_turn(payload)
             elif action == "negotiation_state":
                 res = handle_negotiation_state(payload)
             else:
                 raise ValueError(
                     f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', "
                     "'payment_confirmed', 'check_replies', 'installment_paid', "
-                    "'incoming_text', and 'negotiation_state'."
+                    "'incoming_text', 'voice_turn', and 'negotiation_state'."
                 )
 
         json.dump(res, sys.stdout)

@@ -35,6 +35,7 @@ const dueLabel = (iso: string): string => {
 const channelLabel = (channel?: string): string => {
   if (channel === 'whatsapp') return 'WhatsApp';
   if (channel === 'sms') return 'SMS';
+  if (channel === 'phone') return 'phone call';
   return 'email';
 };
 
@@ -141,7 +142,7 @@ export const NegotiationsPanel: React.FC<NegotiationsPanelProps> = ({ refreshKey
 
       {!loading && !loadError && conversations.length === 0 && (
         <p className="body body--sm" style={{ opacity: 0.6, marginTop: 14 }}>
-          No reply threads yet — once a client replies by email, WhatsApp, or SMS, it'll show up here.
+          No reply threads yet — once a client replies by email, WhatsApp, SMS, or you call them, it'll show up here.
         </p>
       )}
 

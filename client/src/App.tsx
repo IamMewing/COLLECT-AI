@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioOutcome } from './types';
-import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, checkPaypalStatus, fetchAuthStatus } from './api';
+import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, triggerVoiceCall, checkPaypalStatus, fetchAuthStatus } from './api';
 import { PasswordGate } from './components/PasswordGate';
 import { Boot } from './components/Boot';
 import { LiquidBlobs } from './components/LiquidBlobs';
@@ -69,6 +69,8 @@ export const App: React.FC = () => {
   const [error, setError] = useState<ApiError | null>(null);
   const [showAddInvoice, setShowAddInvoice] = useState(false);
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+  const [isCalling, setIsCalling] = useState(false);
+  const [callNote, setCallNote] = useState<string | null>(null);
   const [paypalConfigured, setPaypalConfigured] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   // 'checking' avoids a flash of either the lock screen or the real app
@@ -241,6 +243,24 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleCallThem = async (invoice: Invoice) => {
+    setIsCalling(true);
+    setCallNote(null);
+    try {
+      const result = await triggerVoiceCall(invoice.invoice_id);
+      setCallNote(
+        result.real_call
+          ? `Calling ${invoice.client_name} now at ${result.recipient} — watch "Still talking it out" below as it happens.`
+          : 'Twilio voice calling is not configured yet, so this was a stub — no real call was placed.'
+      );
+      setHistoryRefreshKey((k) => k + 1);
+    } catch (err: any) {
+      setCallNote(err?.details || err?.error || 'Could not place the call.');
+    } finally {
+      setIsCalling(false);
+    }
+  };
+
   if (authState === 'checking') {
     // Deliberately blank rather than a spinner — this resolves in one fast
     // same-origin request, and a spinner that appears for a few dozen
@@ -307,8 +327,13 @@ export const App: React.FC = () => {
               onAddInvoice={() => setShowAddInvoice(true)}
               onMarkPaid={handleMarkPaid}
               isMarkingPaid={isMarkingPaid}
+              onCallThem={handleCallThem}
+              isCalling={isCalling}
               onInvoicesImported={loadInvoices}
             />
+            {callNote && (
+              <p className="body body--sm" style={{ opacity: 0.75, marginTop: 14 }}>{callNote}</p>
+            )}
           </div>
           <PortfolioSweep invoices={invoices} onOpen={handleOpenPortfolioResult} />
         </Field>

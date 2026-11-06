@@ -4,6 +4,7 @@ from .execute import (
     record_payment_confirmed,
     handle_incoming_reply,
     handle_incoming_text,
+    handle_voice_turn,
     process_due_installments,
     handle_installment_paid,
 )
@@ -13,6 +14,7 @@ from .mock import (
     mock_payment_confirmed,
     mock_handle_incoming_reply,
     mock_handle_incoming_text,
+    mock_handle_voice_turn,
 )
 from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMessage, Reflection, NegotiationTurn
 from .memory import get_client_memory, update_client_memory, has_client_memory
@@ -25,6 +27,7 @@ __all__ = [
     "record_payment_confirmed",
     "handle_incoming_reply",
     "handle_incoming_text",
+    "handle_voice_turn",
     "process_due_installments",
     "handle_installment_paid",
     "mock_run_sweep",
@@ -32,6 +35,7 @@ __all__ = [
     "mock_payment_confirmed",
     "mock_handle_incoming_reply",
     "mock_handle_incoming_text",
+    "mock_handle_voice_turn",
     "get_client_memory",
     "update_client_memory",
     "has_client_memory",

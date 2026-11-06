@@ -500,6 +500,169 @@ def handle_incoming_text(from_phone: str, body: str, channel: str = "sms") -> di
     })
 
 
+# Caps how many agent turns a single live call can run to — without this, a
+# client who just keeps talking (or a flaky transcription loop) could run up
+# an unbounded number of LLM calls on one phone call. 6 is generous for a
+# collections call (opening + a few back-and-forths) without being so long
+# it reads as the agent stalling; past this it wraps up and hangs up
+# regardless of where the conversation was.
+MAX_VOICE_TURNS = 6
+
+
+def handle_voice_turn(invoice_id: str, transcript: str | None, invoice: dict | None = None) -> dict:
+    """One leg of a live Twilio Voice call — called by the 'voice_turn'
+    bridge action from BOTH of server.js's voice webhooks:
+
+      - POST /api/twilio/voice (the call just connected, transcript=None —
+        the client hasn't said anything yet because the agent is the one
+        placing this call).
+      - POST /api/twilio/voice/gather (Twilio's <Gather input="speech">
+        just transcribed what the client said; transcript is that text,
+        or '' if the client said nothing before the gather timed out).
+
+    Returns {"say": <exact text to speak now, via TwiML <Say>>, "continue":
+    <bool — True means Node should <Gather> again, False means <Hangup>
+    after speaking>, "status": ...}. There is deliberately no separate
+    "send" step the way there is for email/WhatsApp/SMS: on a live call,
+    *speaking* the line IS the send, so whatever reply_body the negotiate
+    agent writes goes straight into "say" with no human-approval gate —
+    the same AUTO_APPROVE_NEGOTIATION consideration that gates autonomous
+    text replies doesn't apply here because there's no asynchronous queue
+    to hold a spoken line in; the call is happening right now.
+
+    Reuses the exact same negotiate agent (and NegotiationTurn decision:
+    continue_negotiating / resolved / escalate_to_human) that drives email/
+    WhatsApp/SMS replies, so a client gets the same judgment whichever
+    channel they're on — agent/agents.py's build_negotiate_agent prompt has
+    phone-specific instructions (short spoken lines, never read a URL aloud)
+    layered on top of the same base behavior.
+    """
+    convo = get_conversation(invoice_id)
+    client_name = (invoice or {}).get("client_name") or (convo or {}).get("client_name") or "there"
+    recipient_phone = (invoice or {}).get("phone") or (convo or {}).get("recipient_phone")
+
+    if convo is None or convo.get("status") != "active":
+        # get-or-create / reactivate — a voice call is outreach just like
+        # the first email/text, and a client who was previously resolved or
+        # escalated calling back (or being called back) should still land
+        # in an active thread, not a dead one.
+        start_conversation(invoice_id, client_name=client_name, recipient_phone=recipient_phone)
+        convo = get_conversation(invoice_id)
+
+    is_opening = transcript is None
+    if transcript:
+        append_conversation_turn(invoice_id, role="client", body=transcript, channel="phone")
+        convo = get_conversation(invoice_id)
+
+    # Count only this invoice's PAST phone turns — an invoice already chased
+    # by email for months shouldn't have its very first phone call cut short
+    # because of unrelated email history.
+    phone_agent_turns = sum(
+        1 for t in convo.get("turns", []) if t.get("role") == "agent" and t.get("channel") == "phone"
+    )
+    if phone_agent_turns >= MAX_VOICE_TURNS:
+        closing = f"We're about at time for this call — I'll follow up by text with everything we discussed. Thanks, {client_name}."
+        append_conversation_turn(invoice_id, role="agent", body=closing, channel="phone")
+        record_message_history({
+            "invoice_id": invoice_id, "client_name": client_name, "channel": "phone",
+            "subject": None, "body": closing, "recipient": recipient_phone,
+            "status": "call wrapped up (turn limit)", "real_send": True,
+        })
+        return {"say": closing, "continue": False, "status": "call_turn_limit_reached"}
+
+    thread_text = "\n\n".join(
+        f"[{t.get('role', '?').upper()} via {t.get('channel', 'phone')}]\n{t.get('body', '')}"
+        for t in convo.get("turns", [])
+    )
+
+    negotiate_agent = build_negotiate_agent()
+    if is_opening:
+        context = (
+            f"Invoice {invoice_id}, client \"{client_name}\". You are placing this call "
+            "yourself right now — the client hasn't said anything on this call yet.\n\n"
+            + (
+                f"Prior contact on this invoice so far (oldest first):\n\n{thread_text}\n\n"
+                if thread_text else "There's no prior contact on this invoice yet — this is the "
+                "first outreach of any kind.\n\n"
+            )
+            + "This is your opening turn: introduce yourself briefly, state the reason for the "
+            "call in 1-2 short spoken sentences (referencing prior contact only if it's there), "
+            "then stop and wait for them to respond. Use outcome='continue_negotiating'."
+        )
+    else:
+        context = (
+            f"Invoice {invoice_id}, client \"{client_name}\".\n\n"
+            f"Live phone call, full thread so far (oldest first):\n\n{thread_text}\n\n"
+            "Decide the outcome for the latest turn, per your instructions."
+        )
+
+    try:
+        result = negotiate_agent(context)
+        decision: NegotiationTurn = result.structured_output
+    except Exception as exc:  # noqa: BLE001 - a flaky model call must never leave a live call hanging
+        print(f"[VOICE] LLM call failed for {invoice_id} ({exc}) — ending the call and escalating.", flush=True)
+        set_conversation_status(invoice_id, "escalated")
+        closing = "Sorry — I'm having trouble on my end right now. I'll have someone from our team follow up with you directly."
+        append_conversation_turn(invoice_id, role="agent", body=closing, channel="phone")
+        return {"say": closing, "continue": False, "status": "escalate_to_human"}
+
+    # A payment link minted mid-call is never spoken aloud (see the
+    # negotiate agent's phone-specific instructions) — it's texted for real
+    # instead, the moment the agent decides to mint one, so the spoken
+    # promise ("I'll text that to you") is always true rather than aspirational.
+    if decision.payment_link and recipient_phone:
+        send_text_message(
+            recipient_phone,
+            f"Here's your payment link for invoice {invoice_id}: {decision.payment_link}",
+            opens_session=False,
+        )
+
+    if decision.installments and len(decision.installments) >= 2:
+        now = datetime.now(timezone.utc)
+        installment_records = []
+        for i, inst in enumerate(decision.installments):
+            is_first_and_billed = i == 0 and decision.paypal_order_id
+            installment_records.append({
+                "index": i,
+                "amount_usd": inst.amount_usd,
+                "description": inst.description,
+                "due_at": (now + timedelta(days=inst.due_in_days)).isoformat(),
+                "status": "awaiting_payment" if is_first_and_billed else "scheduled",
+                "paypal_order_id": decision.paypal_order_id if is_first_and_billed else None,
+                "payment_link": decision.payment_link if is_first_and_billed else None,
+            })
+        create_payment_plan(invoice_id, client_name=client_name, installments=installment_records)
+        if decision.paypal_order_id:
+            save_installment_order_mapping(decision.paypal_order_id, invoice_id=invoice_id, client_name=client_name, installment_index=0)
+
+    if decision.outcome == "resolved":
+        set_conversation_status(invoice_id, "resolved")
+        closing = decision.reply_body or f"Great, thanks {client_name} — that's all I needed. Have a good day."
+        append_conversation_turn(invoice_id, role="agent", body=closing, channel="phone")
+        record_message_history({
+            "invoice_id": invoice_id, "client_name": client_name, "channel": "phone",
+            "subject": None, "body": closing, "recipient": recipient_phone,
+            "status": "call resolved", "real_send": True,
+        })
+        return {"say": closing, "continue": False, "status": "resolved"}
+
+    if decision.outcome == "escalate_to_human":
+        set_conversation_status(invoice_id, "escalated")
+        closing = decision.reply_body or "I'm going to have someone from our team follow up with you directly on this — thanks for your time."
+        append_conversation_turn(invoice_id, role="agent", body=closing, channel="phone")
+        record_message_history({
+            "invoice_id": invoice_id, "client_name": client_name, "channel": "phone",
+            "subject": None, "body": closing, "recipient": recipient_phone,
+            "status": "call escalated", "real_send": True,
+        })
+        return {"say": closing, "continue": False, "status": "escalate_to_human"}
+
+    # continue_negotiating
+    say_line = decision.reply_body or "Sorry, could you say that again?"
+    append_conversation_turn(invoice_id, role="agent", body=say_line, channel="phone")
+    return {"say": say_line, "continue": True, "status": "continue_negotiating"}
+
+
 def process_due_installments() -> list[dict]:
     """Scans every active payment plan for an installment whose due date has
     arrived and hasn't been billed yet, mints its real PayPal order, and

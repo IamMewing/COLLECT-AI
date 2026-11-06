@@ -6,7 +6,7 @@ const rateLimit = require('express-rate-limit');
 const twilio = require('twilio');
 require('dotenv').config();
 
-const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText } = require('./agentService');
+const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText, handleVoiceTurn } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
 const { parseInvoiceCsv } = require('./csvImport');
@@ -725,9 +725,39 @@ app.get('/api/twilio/status', auth.requireAuth, (req, res) => {
     configured: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
     whatsapp_from_configured: Boolean(process.env.TWILIO_WHATSAPP_FROM),
     sms_from_configured: Boolean(process.env.TWILIO_SMS_FROM),
+    // Voice calls (Phase 5) reuse the same SMS sender number as the caller
+    // ID — a single Twilio number handles both SMS and Voice by default,
+    // so there's no separate TWILIO_VOICE_FROM to configure.
+    voice_call_configured: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_SMS_FROM),
     webhook_unverified_allowed: (process.env.TWILIO_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true',
   });
 });
+
+/**
+ * Shared Twilio-signature verification for EVERY Twilio webhook this server
+ * exposes — inbound WhatsApp/SMS below, and the three Voice webhooks
+ * further down. twilio.validateRequest hashes the exact URL Twilio called
+ * plus the parsed body, so this must only ever run after the body-parsing
+ * middleware above has populated req.body. Same reasoning everywhere it's
+ * used: anyone who finds one of these URLs could otherwise inject a fake
+ * client reply, or fake their way through a live call's turns, into a real
+ * negotiation thread — an unverified request is REFUSED by default, not
+ * processed-with-a-warning. TWILIO_WEBHOOK_ALLOW_UNVERIFIED=true is the one
+ * escape hatch, for local testing without a publicly reachable URL for
+ * Twilio to actually sign against — it must never be true where any of
+ * these routes are actually internet-reachable.
+ */
+function verifyTwilioWebhook(req) {
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const signature = req.headers['x-twilio-signature'];
+  const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+  const verified = Boolean(authToken) && twilio.validateRequest(authToken, signature, fullUrl, req.body || {});
+  const allowUnverified = (process.env.TWILIO_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true';
+  const reason = authToken
+    ? 'signature verification failed'
+    : 'TWILIO_AUTH_TOKEN is not set, so there is nothing to verify the signature against';
+  return { verified, allowUnverified, reason };
+}
 
 /**
  * POST /api/twilio/webhook
@@ -736,33 +766,14 @@ app.get('/api/twilio/status', auth.requireAuth, (req, res) => {
  * /api/agent/check-replies poll for email. Every inbound message runs
  * through the exact same negotiation loop (agent/execute.py's
  * handle_incoming_reply via handle_incoming_text) that email replies do.
- *
- * Signature verification needs TWILIO_AUTH_TOKEN (same credential used to
- * send) — twilio.validateRequest hashes the exact URL Twilio called plus the
- * parsed form body, so this must be registered AFTER the
- * express.urlencoded() middleware above populates req.body. An unverified
- * request is REFUSED, not processed-with-a-warning, same reasoning as the
- * PayPal webhook above: anyone who finds this URL could otherwise inject
- * fake client replies into a real negotiation thread. The one escape hatch
- * is TWILIO_WEBHOOK_ALLOW_UNVERIFIED=true, for local testing without a
- * publicly reachable URL for Twilio to actually sign against — it must
- * never be true where this is actually internet-reachable.
  */
 app.post('/api/twilio/webhook', async (req, res) => {
   const respondEmptyTwiml = () => res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
   try {
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const signature = req.headers['x-twilio-signature'];
-    const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-    const verified = Boolean(authToken) && twilio.validateRequest(authToken, signature, fullUrl, req.body || {});
-    const allowUnverified = (process.env.TWILIO_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true';
+    const { verified, allowUnverified, reason } = verifyTwilioWebhook(req);
 
     if (!verified) {
-      const reason = authToken
-        ? 'signature verification failed'
-        : 'TWILIO_AUTH_TOKEN is not set, so there is nothing to verify the signature against';
-
       if (!allowUnverified) {
         console.warn(`⛔ [Twilio webhook] Rejected (401) — ${reason}.`);
         return res.status(401).send('Signature not verified');
@@ -801,6 +812,242 @@ app.post('/api/twilio/webhook', async (req, res) => {
     // succeeded already.
     respondEmptyTwiml();
   }
+});
+
+/** Looks up one invoice (user-created or curated sample) by id — same
+ *  lookup every other per-invoice route in this file does inline; factored
+ *  out once here since the three voice routes below all need it. */
+async function findInvoiceById(id) {
+  const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
+  return allInvoices.find((i) => i.invoice_id === id) || null;
+}
+
+/** Renders a short apologetic TwiML response and ends the call — used by
+ *  the voice webhooks below whenever something is wrong enough that there's
+ *  no sense continuing (invoice not found, Twilio signature rejected), but
+ *  the caller is Twilio itself and needs valid TwiML back, not JSON. */
+function respondVoiceError(res, message) {
+  const VoiceResponse = twilio.twiml.VoiceResponse;
+  const response = new VoiceResponse();
+  response.say(message);
+  response.hangup();
+  res.type('text/xml').send(response.toString());
+}
+
+/**
+ * POST /api/agent/invoices/:id/call
+ * Places a REAL outbound call via Twilio to the invoice's phone number —
+ * triggered by a human clicking "Call them" in the dashboard (explicit
+ * consent for this one call, same as clicking Approve is consent to send a
+ * drafted email/text). This endpoint's only job is placing the call: it
+ * tells Twilio to fetch its first turn's instructions from
+ * POST /api/twilio/voice the moment the client picks up. Nothing about what
+ * the agent actually SAYS happens here — that's agent/execute.py's
+ * handle_voice_turn, driven entirely by Twilio re-fetching TwiML from this
+ * server turn by turn (see the two webhooks below).
+ *
+ * Degrades gracefully when Twilio isn't configured (same pattern as every
+ * other real-send path in this project): returns a 'stubbed' result instead
+ * of erroring, so the rest of the demo keeps working without real
+ * credentials — GET /api/twilio/status's voice_call_configured tells the UI
+ * which case to expect before it even tries.
+ */
+app.post('/api/agent/invoices/:id/call', agentLimiter, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const invoice = await findInvoiceById(id);
+    if (!invoice) {
+      return res.status(404).json({ error: 'Invoice not found', details: id });
+    }
+    if (!invoice.phone) {
+      return res.status(400).json({ error: 'No phone on file', details: `${id} has no phone number — add one before calling.` });
+    }
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const callerId = process.env.TWILIO_SMS_FROM; // same number handles SMS + Voice
+
+    if (!accountSid || !authToken || !callerId) {
+      console.log(`\n📞 [POST /api/agent/invoices/${id}/call] (stub — Twilio not configured) Would call ${invoice.phone}.`);
+      return res.json({ status: 'stubbed', real_call: false, recipient: invoice.phone, call_sid: null });
+    }
+
+    const base = `${req.protocol}://${req.get('host')}`;
+    const voiceUrl = `${base}/api/twilio/voice?invoice_id=${encodeURIComponent(id)}`;
+    const statusCallbackUrl = `${base}/api/twilio/voice/status?invoice_id=${encodeURIComponent(id)}`;
+
+    const client = twilio(accountSid, authToken);
+    const call = await client.calls.create({
+      to: invoice.phone,
+      from: callerId,
+      url: voiceUrl,
+      status_callback: statusCallbackUrl,
+      status_callback_event: ['completed'],
+    });
+
+    console.log(`\n📞 [POST /api/agent/invoices/${id}/call] Real call placed to ${invoice.phone}, sid=${call.sid}`);
+    res.json({ status: call.status || 'queued', real_call: true, recipient: invoice.phone, call_sid: call.sid });
+  } catch (error) {
+    console.error(`❌ [POST /api/agent/invoices/${id}/call] Failed:`, error);
+    res.status(500).json({ error: 'Failed to place call', details: error.message });
+  }
+});
+
+/**
+ * POST /api/twilio/voice
+ * Twilio fetches this the instant the client answers — the call's opening
+ * turn. Signature-verified like every other Twilio webhook here. Looks up
+ * the invoice (from the ?invoice_id= query param this server itself put on
+ * the url when placing the call above) and asks the Python bridge what the
+ * agent's opening line should be (agent/execute.py's handle_voice_turn with
+ * transcript=null). Speaks that line, then <Gather>s for the client's
+ * response — actionOnEmptyResult="true" means even silence routes back to
+ * POST /api/twilio/voice/gather below, so that one webhook is the single
+ * place "what did the client say, if anything" gets handled.
+ */
+app.post('/api/twilio/voice', async (req, res) => {
+  try {
+    const { verified, allowUnverified, reason } = verifyTwilioWebhook(req);
+    if (!verified && !allowUnverified) {
+      console.warn(`⛔ [Twilio voice] Rejected (401) — ${reason}.`);
+      return res.status(401).send('Signature not verified');
+    }
+    if (!verified) {
+      console.warn(`⚠️  [Twilio voice] UNVERIFIED call processed anyway — ${reason}.`);
+    }
+
+    const invoiceId = req.query.invoice_id;
+    if (!invoiceId) {
+      return respondVoiceError(res, 'Sorry, this call was not set up correctly. Goodbye.');
+    }
+    const invoice = await findInvoiceById(invoiceId);
+    if (!invoice) {
+      return respondVoiceError(res, 'Sorry, I could not find that invoice on file. Goodbye.');
+    }
+
+    const result = await handleVoiceTurn(invoiceId, null, invoice);
+    console.log(`\n📞 [Twilio voice] Opening turn for ${invoiceId}: "${result.say}"`);
+
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+    const response = new VoiceResponse();
+    response.say({ voice: 'Polly.Joanna' }, result.say);
+    if (result.continue) {
+      response.gather({
+        input: 'speech',
+        action: `/api/twilio/voice/gather?invoice_id=${encodeURIComponent(invoiceId)}`,
+        method: 'POST',
+        speechTimeout: 'auto',
+        timeout: 6,
+        actionOnEmptyResult: true,
+      });
+    } else {
+      response.hangup();
+    }
+    res.type('text/xml').send(response.toString());
+  } catch (error) {
+    console.error('❌ [Twilio voice] Failed:', error);
+    respondVoiceError(res, "Sorry, I'm having trouble on my end. I'll follow up another way. Goodbye.");
+  }
+});
+
+/**
+ * POST /api/twilio/voice/gather
+ * Twilio posts here after every <Gather> on the call — with a SpeechResult
+ * if it caught something, or with no SpeechResult at all if the client said
+ * nothing before the timeout (actionOnEmptyResult="true" above is what
+ * makes silence reach this webhook too, instead of Twilio just hanging up
+ * on its own). A silent turn is handled right here, with no Python/LLM call
+ * at all — one re-prompt via ?retry=1, then a graceful hangup — so saying
+ * nothing never burns part of the conversation's turn budget
+ * (agent/execute.py's MAX_VOICE_TURNS). An actual transcript goes through
+ * handle_voice_turn exactly like every other turn.
+ */
+app.post('/api/twilio/voice/gather', async (req, res) => {
+  try {
+    const { verified, allowUnverified, reason } = verifyTwilioWebhook(req);
+    if (!verified && !allowUnverified) {
+      console.warn(`⛔ [Twilio voice/gather] Rejected (401) — ${reason}.`);
+      return res.status(401).send('Signature not verified');
+    }
+    if (!verified) {
+      console.warn(`⚠️  [Twilio voice/gather] UNVERIFIED call processed anyway — ${reason}.`);
+    }
+
+    const invoiceId = req.query.invoice_id;
+    const speechResult = req.body?.SpeechResult;
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+
+    if (!invoiceId) {
+      return respondVoiceError(res, 'Sorry, this call was not set up correctly. Goodbye.');
+    }
+
+    if (!speechResult) {
+      if (req.query.retry) {
+        console.log(`\n📞 [Twilio voice/gather] Still silent for ${invoiceId} after a re-prompt — hanging up.`);
+        const response = new VoiceResponse();
+        response.say("No worries — I'll follow up by text instead. Goodbye.");
+        response.hangup();
+        return res.type('text/xml').send(response.toString());
+      }
+      console.log(`\n📞 [Twilio voice/gather] Nothing heard for ${invoiceId} — re-prompting once.`);
+      const response = new VoiceResponse();
+      response.say("Sorry, I didn't catch that — could you say that again?");
+      response.gather({
+        input: 'speech',
+        action: `/api/twilio/voice/gather?invoice_id=${encodeURIComponent(invoiceId)}&retry=1`,
+        method: 'POST',
+        speechTimeout: 'auto',
+        timeout: 6,
+        actionOnEmptyResult: true,
+      });
+      return res.type('text/xml').send(response.toString());
+    }
+
+    const invoice = await findInvoiceById(invoiceId);
+    const result = await handleVoiceTurn(invoiceId, speechResult, invoice);
+    console.log(`\n📞 [Twilio voice/gather] ${invoiceId} client said: "${speechResult}" — agent: "${result.say}"`);
+
+    const response = new VoiceResponse();
+    response.say({ voice: 'Polly.Joanna' }, result.say);
+    if (result.continue) {
+      response.gather({
+        input: 'speech',
+        action: `/api/twilio/voice/gather?invoice_id=${encodeURIComponent(invoiceId)}`,
+        method: 'POST',
+        speechTimeout: 'auto',
+        timeout: 6,
+        actionOnEmptyResult: true,
+      });
+    } else {
+      response.hangup();
+    }
+    res.type('text/xml').send(response.toString());
+  } catch (error) {
+    console.error('❌ [Twilio voice/gather] Failed:', error);
+    respondVoiceError(res, "Sorry, I'm having trouble on my end. I'll follow up another way. Goodbye.");
+  }
+});
+
+/**
+ * POST /api/twilio/voice/status
+ * Twilio's call-status callback (statusCallbackEvent=['completed'] when the
+ * call was placed above) — logging only, so a completed/failed/no-answer
+ * call shows up in server logs even though nothing about it needs to
+ * change application state. No TwiML needed since this never drives the
+ * call itself.
+ */
+app.post('/api/twilio/voice/status', (req, res) => {
+  const { verified, allowUnverified, reason } = verifyTwilioWebhook(req);
+  if (!verified && !allowUnverified) {
+    console.warn(`⛔ [Twilio voice/status] Rejected (401) — ${reason}.`);
+    return res.status(401).send('Signature not verified');
+  }
+  const invoiceId = req.query.invoice_id;
+  console.log(
+    `\n📞 [Twilio voice/status] ${invoiceId || '(unknown invoice)'}: ` +
+    `status=${req.body?.CallStatus || '?'} duration=${req.body?.CallDuration || '?'}s`
+  );
+  res.sendStatus(200);
 });
 
 /**

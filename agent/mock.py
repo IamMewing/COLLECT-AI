@@ -348,3 +348,83 @@ def mock_handle_incoming_text(from_phone: str, body: str, channel: str = "sms") 
         "invoice_id": invoice_id, "body": body, "channel": channel,
         "subject": None, "from_phone": from_phone,
     })
+
+
+# Deliberately smaller than execute.py's real MAX_VOICE_TURNS (6) — this is
+# purely a demo-mode constant so the "wrap up and hang up" branch is easy to
+# reach in a mock-mode smoke test without a long scripted exchange; it isn't
+# imported from execute.py on purpose, keeping mock.py's "zero strands import"
+# independence intact (see the module docstring).
+_MOCK_VOICE_TURN_LIMIT = 3
+
+
+def mock_handle_voice_turn(invoice_id: str, transcript: str | None, invoice: dict | None = None) -> dict:
+    """Deterministic mock counterpart to execute.handle_voice_turn — zero
+    LLM/network calls. Same get-or-create/reactivate conversation handling,
+    same turn-cap idea (just a smaller constant, see above), but keyword
+    classification instead of a real negotiation decision, matching
+    mock_handle_incoming_reply's approach for text channels. Returns the
+    same {"say", "continue", "status"} shape the real version does, since
+    server.js's voice webhooks consume both identically."""
+    convo = get_conversation(invoice_id)
+    client_name = (invoice or {}).get("client_name") or (convo or {}).get("client_name") or "there"
+    recipient_phone = (invoice or {}).get("phone") or (convo or {}).get("recipient_phone")
+
+    if convo is None or convo.get("status") != "active":
+        start_conversation(invoice_id, client_name=client_name, recipient_phone=recipient_phone)
+        convo = get_conversation(invoice_id)
+
+    is_opening = transcript is None
+    if transcript:
+        append_conversation_turn(invoice_id, role="client", body=transcript, channel="phone")
+        convo = get_conversation(invoice_id)
+
+    phone_agent_turns = sum(
+        1 for t in convo.get("turns", []) if t.get("role") == "agent" and t.get("channel") == "phone"
+    )
+
+    if is_opening:
+        line = (
+            f"Hi {client_name}, this is CollectAI calling on behalf of the accounts team "
+            f"about invoice {invoice_id}. Is now an OK time to talk about it? [MOCK]"
+        )
+        append_conversation_turn(invoice_id, role="agent", body=line, channel="phone")
+        return {"say": line, "continue": True, "status": "continue_negotiating"}
+
+    if phone_agent_turns >= _MOCK_VOICE_TURN_LIMIT:
+        line = f"Thanks for your time, {client_name} — I'll follow up by text with a summary. [MOCK]"
+        append_conversation_turn(invoice_id, role="agent", body=line, channel="phone")
+        record_message_history({
+            "invoice_id": invoice_id, "client_name": client_name, "channel": "phone",
+            "subject": None, "body": line, "recipient": recipient_phone,
+            "status": "call wrapped up (turn limit)", "real_send": False,
+        })
+        return {"say": line, "continue": False, "status": "call_turn_limit_reached"}
+
+    lowered = (transcript or "").lower()
+
+    if any(kw in lowered for kw in _RESOLVED_KEYWORDS):
+        set_conversation_status(invoice_id, "resolved")
+        line = "Got it, thanks for confirming — I'll update our records right away. [MOCK]"
+        append_conversation_turn(invoice_id, role="agent", body=line, channel="phone")
+        record_message_history({
+            "invoice_id": invoice_id, "client_name": client_name, "channel": "phone",
+            "subject": None, "body": line, "recipient": recipient_phone,
+            "status": "call resolved", "real_send": False,
+        })
+        return {"say": line, "continue": False, "status": "resolved"}
+
+    if any(kw in lowered for kw in _ESCALATE_KEYWORDS):
+        set_conversation_status(invoice_id, "escalated")
+        line = "I understand — I'll have someone from our team call you back directly on this. [MOCK]"
+        append_conversation_turn(invoice_id, role="agent", body=line, channel="phone")
+        record_message_history({
+            "invoice_id": invoice_id, "client_name": client_name, "channel": "phone",
+            "subject": None, "body": line, "recipient": recipient_phone,
+            "status": "call escalated", "real_send": False,
+        })
+        return {"say": line, "continue": False, "status": "escalate_to_human"}
+
+    line = "No problem — would a two-week extension work, or would a short payment plan help more? [MOCK]"
+    append_conversation_turn(invoice_id, role="agent", body=line, channel="phone")
+    return {"say": line, "continue": True, "status": "continue_negotiating"}

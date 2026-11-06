@@ -124,8 +124,9 @@ export interface ConversationTurn {
   subject: string | null;
   body: string;
   /** Which channel this specific turn happened on — a thread can switch
-   *  mid-conversation (e.g. emailed, but the client replies on WhatsApp). */
-  channel?: 'email' | 'whatsapp' | 'sms';
+   *  mid-conversation (e.g. emailed, but the client replies on WhatsApp, or
+   *  a live phone call picks up where an email thread left off). */
+  channel?: 'email' | 'whatsapp' | 'sms' | 'phone';
   timestamp: string;
 }
 
@@ -190,4 +191,17 @@ export interface MessageHistoryEntry {
   /** True only when a real send actually dispatched (SMTP or Twilio). */
   real_send: boolean;
   timestamp: string;
+}
+
+/** Response from POST /api/agent/invoices/:id/call (Phase 5 — AI voice
+ *  calls). The call itself unfolds turn-by-turn over actual phone minutes
+ *  after this returns — this just confirms whether Twilio actually agreed
+ *  to place it (or that it was stubbed because Twilio isn't configured).
+ *  Watch the conversation thread in NegotiationsPanel (channel: 'phone') to
+ *  see it happen. */
+export interface CallTriggerResult {
+  status: string;
+  real_call: boolean;
+  recipient: string;
+  call_sid: string | null;
 }

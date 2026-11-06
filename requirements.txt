@@ -7,4 +7,16 @@ pydantic>=2
 # history log, used when FIRESTORE_ENABLED=true — see agent/memory.py. Local
 # JSON files remain the default so nothing requires GCP credentials locally.
 google-cloud-firestore>=2.19
+# PayPal's own agent-toolkit SDK — gives the negotiate agent (agent/agents.py)
+# real, directly-callable PayPal Orders tools instead of Node-side code being
+# the only thing that ever talks to PayPal. Verified against v1.11.0 by
+# installing it and reading the actual tool_handlers/parameters source (same
+# "not from memory" standard as the Strands integration — see README). Only
+# the Orders tools are used (create/capture/get) — the toolkit's invoicing
+# tools (create_invoice, send_invoice, send_invoice_reminder) hit the exact
+# `/v2/invoicing/invoices` endpoint that already returned a persistent 403
+# NOT_AUTHORIZED on this project's sandbox account (see PAYPAL_SETUP.md), so
+# they're deliberately not wired up — Orders is the API family already
+# confirmed working here.
+paypal-agent-toolkit>=1.11.0
 

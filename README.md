@@ -32,6 +32,18 @@ meant to run on a schedule — a Cloud Scheduler job hitting
 `X-Scheduler-Secret` header (see `server/.env.example`) since there's no
 browser session to present a cookie.
 
+The moment this agent and the client land on a specific number — the full
+balance, a negotiated settlement, or one installment — it calls PayPal's own
+**Agent Toolkit** (`paypal-agent-toolkit`, see `agent/tools/paypal_tools.py`)
+directly to mint a real, payable order and weaves the real link straight
+into its reply, instead of just promising one in words. This is a different
+integration style from the sweep/approve flow below: there, Node code
+creates the order after a human approves; here, the LLM itself calls
+PayPal's tool mid-conversation. Only the Orders API is wired up here — the
+toolkit's invoicing tools hit the same `/v2/invoicing/invoices` endpoint
+that already 403'd on this project's sandbox account (see "Why Orders API
+instead of Invoicing" below), so they're deliberately left out.
+
 ## PayPal integration (agentic commerce)
 
 When a human approves the agent's drafted message, the server creates a
@@ -56,7 +68,8 @@ agent/
 ├── models.py        Pydantic schemas for structured node outputs
 ├── tools/
 │   ├── risk.py           calculate_risk_score — ported from riskEngine.js
-│   └── probability.py    predict_payment_probability — ported from probabilityEngine.js
+│   ├── probability.py    predict_payment_probability — ported from probabilityEngine.js
+│   └── paypal_tools.py   create_paypal_order / get_paypal_order_status — PayPal's own Agent Toolkit
 ├── agents.py         Per-node Agent definitions (model, tools, prompts)
 ├── graph.py          The actual strands.multiagent.Graph wiring
 ├── execute.py        Phase 2: approve → send → reflect (post-graph)

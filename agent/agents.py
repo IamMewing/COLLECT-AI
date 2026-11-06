@@ -15,7 +15,7 @@ import os
 from strands import Agent
 from strands.models.anthropic import AnthropicModel
 
-from .tools import calculate_risk_score, predict_payment_probability
+from .tools import calculate_risk_score, predict_payment_probability, create_paypal_order, get_paypal_order_status
 from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMessage, Reflection, NegotiationTurn
 
 MODEL_ID = os.environ.get("COLLECTAI_MODEL_ID", "claude-sonnet-4-6")
@@ -164,11 +164,12 @@ def build_negotiate_agent():
         Agent(
             name="negotiate",
             model=get_model(),
+            tools=[create_paypal_order, get_paypal_order_status],
             system_prompt=(
                 "You are continuing a real email conversation with a client about an "
                 "overdue invoice, on behalf of the accounts team. You're given the full "
-                "thread so far (oldest first) ending with the client's latest message. "
-                "Decide one of three outcomes:\n\n"
+                "thread so far (oldest first) ending with the client's latest message, "
+                "including the invoice id and client name. Decide one of three outcomes:\n\n"
                 "1. outcome='resolved' — the client has clearly agreed to pay (in full or "
                 "via a plan you already proposed) or confirms payment is already made. "
                 "Leave reply_subject/reply_body empty.\n"
@@ -185,6 +186,17 @@ def build_negotiate_agent():
                 "it in both reply_body and proposed_plan) rather than just repeating the "
                 "original ask — a plan the client might actually accept is the point of "
                 "this conversation continuing at all.\n\n"
+                "USING THE PAYPAL TOOLS: the moment you and the client land on a specific "
+                "number you're both ready to act on right now — the full balance, a "
+                "negotiated settlement, or the first installment of a plan — call "
+                "create_paypal_order yourself with that exact amount (convert to USD; "
+                "assume 83 INR per USD if the thread is in INR) to mint a real, payable "
+                "link, and weave the returned payment_link directly into reply_body (e.g. "
+                "'Pay instantly via PayPal: <link>'). Don't just promise a link in words — "
+                "generate the real one and include it. Only do this once an amount is "
+                "actually agreed, not while still discussing options. Use "
+                "get_paypal_order_status if you need to check whether a link you sent "
+                "earlier in this thread was already acted on before replying again.\n\n"
                 "IMPORTANT: reply_subject must end with the exact same '[INV-XXXX]' tag "
                 "that appears in the thread's subject lines — this is how later replies "
                 "get matched back to this conversation. Never drop or alter that tag.\n\n"

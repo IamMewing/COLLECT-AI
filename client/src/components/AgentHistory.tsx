@@ -22,9 +22,15 @@ const timeAgo = (iso: string): string => {
   return `${days}d ago`;
 };
 
+const channelLabel = (channel: string): string => {
+  if (channel === 'whatsapp') return 'WhatsApp';
+  if (channel === 'sms') return 'SMS';
+  return 'email';
+};
+
 const statusLabel = (e: MessageHistoryEntry): { text: string; tone: 'sent' | 'rejected' | 'real' } => {
   if (e.status === 'rejected') return { text: 'Rejected by reviewer', tone: 'rejected' };
-  if (e.real_send) return { text: 'Sent (real email)', tone: 'real' };
+  if (e.real_send) return { text: `Sent (real ${channelLabel(e.channel)})`, tone: 'real' };
   return { text: 'Sent (mock)', tone: 'sent' };
 };
 
@@ -106,13 +112,13 @@ export const AgentHistory: React.FC<AgentHistoryProps> = ({ refreshKey }) => {
                     {text}
                   </span>
                   <span className="mono pswp-odds" style={{ opacity: 0.65 }}>
-                    {e.recipient_email ? `to ${e.recipient_email}` : 'to demo inbox'} · {timeAgo(e.timestamp)}
+                    {(e.recipient || e.recipient_email) ? `to ${e.recipient || e.recipient_email}` : 'to demo inbox'} · {timeAgo(e.timestamp)}
                   </span>
                   <ChevronDown size={14} className={`pswp-chev${open ? ' is-open' : ''}`} />
                 </div>
                 {open && (
                   <div className="pswp-reason">
-                    <p><strong>Subject — </strong>{e.subject}</p>
+                    {e.subject && <p><strong>Subject — </strong>{e.subject}</p>}
                     <p style={{ whiteSpace: 'pre-wrap' }}>{e.body}</p>
                   </div>
                 )}

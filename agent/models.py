@@ -23,7 +23,7 @@ class ProbabilityAssessment(BaseModel):
 
 class ActionPlan(BaseModel):
     branch: Literal["standard", "escalation", "no_action"]
-    channel: Literal["email", "whatsapp", "phone", "none"]
+    channel: Literal["email", "whatsapp", "sms", "phone", "none"]
     tone: Literal["friendly", "firm", "urgent", "none"]
     reasoning: str
 
@@ -31,7 +31,7 @@ class ActionPlan(BaseModel):
 class DraftedMessage(BaseModel):
     subject: str
     body: str
-    channel: Literal["email", "whatsapp"]
+    channel: Literal["email", "whatsapp", "sms"]
 
 
 class Reflection(BaseModel):

@@ -44,6 +44,10 @@ from agent import (
     check_for_replies,
     DraftedMessage,
 )
+# handle_incoming_text / mock_handle_incoming_text are imported locally inside
+# the bridge function of the same name below (same reasoning as
+# handle_installment_paid above it) to avoid the module-level import being
+# shadowed by that function's own name.
 
 
 def to_dict(obj):
@@ -97,6 +101,8 @@ def handle_sweep(payload: dict) -> dict:
     # is the invoice object the frontend has in hand by then.
     if invoice.get("email"):
         clean_invoice["email"] = str(invoice["email"])
+    if invoice.get("phone"):
+        clean_invoice["phone"] = str(invoice["phone"])
 
     from agent.memory import get_client_memory, has_client_memory
 
@@ -114,7 +120,9 @@ def handle_sweep(payload: dict) -> dict:
             f"- Days overdue: {clean_invoice['days_overdue']}\n"
             f"- Ignored reminders so far: {clean_invoice['ignored_reminders']}\n"
             f"- Client relationship score: {clean_invoice['relationship_score']} (out of 100)\n"
-            f"- Historical on-time payment rate: {clean_invoice['historical_on_time_rate']}\n\n"
+            f"- Historical on-time payment rate: {clean_invoice['historical_on_time_rate']}\n"
+            f"- Email on file: {'yes' if clean_invoice.get('email') else 'no'}\n"
+            f"- Phone on file: {'yes' if clean_invoice.get('phone') else 'no'}\n\n"
             f"Assess this invoice's risk, predict payment probability, decide action plan, and draft message if warranted."
         )
         graph_result = run_sweep(task, client_name=clean_invoice['client_name'])
@@ -276,6 +284,28 @@ def handle_installment_paid(payload: dict) -> dict:
     }
 
 
+def handle_incoming_text(payload: dict) -> dict:
+    """Triggered by server.js's Twilio webhook handler (POST
+    /api/twilio/webhook) for every inbound WhatsApp/SMS message — the
+    text-message equivalent of handle_check_replies' email polling, except
+    pushed to us by Twilio rather than pulled on a schedule. Resolves which
+    invoice the text belongs to and runs it through the same
+    negotiation-loop logic email replies use (see agent/execute.py's
+    handle_incoming_text / agent/mock.py's mock_handle_incoming_text)."""
+    from_phone = payload.get("from_phone")
+    body = payload.get("body", "")
+    channel = payload.get("channel", "sms")
+    if not from_phone:
+        raise ValueError("Missing 'from_phone' in incoming_text payload")
+
+    if USE_MOCK:
+        from agent import mock_handle_incoming_text as _handle_incoming_text
+    else:
+        from agent import handle_incoming_text as _handle_incoming_text
+
+    return _handle_incoming_text(from_phone, body, channel)
+
+
 def handle_negotiation_state(payload: dict) -> dict:
     """Read-only snapshot for the UI's negotiation panel: every tracked
     conversation thread and payment plan, regardless of status. Unlike
@@ -313,13 +343,15 @@ def main():
                 res = handle_check_replies(payload)
             elif action == "installment_paid":
                 res = handle_installment_paid(payload)
+            elif action == "incoming_text":
+                res = handle_incoming_text(payload)
             elif action == "negotiation_state":
                 res = handle_negotiation_state(payload)
             else:
                 raise ValueError(
                     f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', "
-                    "'payment_confirmed', 'check_replies', 'installment_paid', and "
-                    "'negotiation_state'."
+                    "'payment_confirmed', 'check_replies', 'installment_paid', "
+                    "'incoming_text', and 'negotiation_state'."
                 )
 
         json.dump(res, sys.stdout)

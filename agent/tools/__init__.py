@@ -1,6 +1,7 @@
 from .risk import calculate_risk_score
 from .probability import predict_payment_probability
 from .paypal_tools import create_paypal_order, get_paypal_order_status, save_installment_order_mapping
+from .sms_tools import send_text_message
 
 __all__ = [
     "calculate_risk_score",
@@ -8,4 +9,5 @@ __all__ = [
     "create_paypal_order",
     "get_paypal_order_status",
     "save_installment_order_mapping",
+    "send_text_message",
 ]

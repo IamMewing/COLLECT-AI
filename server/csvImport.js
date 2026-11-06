@@ -19,6 +19,7 @@ const KNOWN_COLUMNS = [
   'client_name',
   'amount',
   'email',
+  'phone',
   'days_overdue',
   'ignored_reminders',
   'relationship_score',
@@ -26,6 +27,9 @@ const KNOWN_COLUMNS = [
 ];
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Lenient on purpose — same pattern the manual add-invoice form uses — this
+// just catches obvious typos, not strict E.164 formatting.
+const PHONE_RE = /^\+?[0-9\s().-]{7,20}$/;
 
 /** Splits one CSV line into fields, honoring double-quoted fields that may
  *  contain commas, newlines (not needed here since we split on lines first,
@@ -131,6 +135,12 @@ function parseInvoiceCsv(csvText) {
       continue;
     }
 
+    const phoneRaw = (get('phone') || '').trim();
+    if (phoneRaw && !PHONE_RE.test(phoneRaw)) {
+      errors.push({ row: rowNum, error: `"${phoneRaw}" doesn't look like a valid phone number.` });
+      continue;
+    }
+
     const daysOverdue = get('days_overdue') ? Number(get('days_overdue')) : 0;
     const ignoredReminders = get('ignored_reminders') ? Number(get('ignored_reminders')) : 0;
     const relationshipScore = get('relationship_score') ? Number(get('relationship_score')) : 75;
@@ -151,6 +161,7 @@ function parseInvoiceCsv(csvText) {
       relationship_score: Number.isFinite(relationshipScore) ? relationshipScore : 75,
       historical_on_time_rate: Number.isFinite(onTimeRate) ? onTimeRate : 0.8,
       ...(emailRaw ? { email: emailRaw } : {}),
+      ...(phoneRaw ? { phone: phoneRaw } : {}),
     });
   }
 

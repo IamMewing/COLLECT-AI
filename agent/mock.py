@@ -24,7 +24,9 @@ from .memory import (
     start_conversation,
     append_conversation_turn,
     set_conversation_status,
+    find_active_conversation_by_phone,
 )
+from .inbox import INVOICE_TAG_RE
 
 
 def mock_run_sweep(invoice: dict) -> dict:
@@ -75,7 +77,14 @@ def mock_run_sweep(invoice: dict) -> dict:
     )
 
     # Mirrors the real plan agent's system-prompt rules in agents.py —
-    # keep these two in sync if you tune the real prompt.
+    # keep these two in sync if you tune the real prompt. Channel choice
+    # respects the same hard constraint the real prompt is told about: never
+    # pick whatsapp/sms without a phone actually on file.
+    has_email = bool(invoice.get("email"))
+    has_phone = bool(invoice.get("phone"))
+    standard_channel = "email" if has_email else ("sms" if has_phone else "email")
+    escalation_channel = "whatsapp" if has_phone else "email"
+
     if probability.probability >= 85:
         plan = ActionPlan(
             branch="no_action",
@@ -86,21 +95,24 @@ def mock_run_sweep(invoice: dict) -> dict:
     elif risk.category in ("Low", "Medium") and probability.probability >= 50:
         plan = ActionPlan(
             branch="standard",
-            channel="email",
+            channel=standard_channel,
             tone="friendly",
-            reasoning="[MOCK] Low/Medium risk with reasonable payment probability.",
+            reasoning=f"[MOCK] Low/Medium risk with reasonable payment probability. "
+                      f"Channel={standard_channel} (email on file: {has_email}, phone on file: {has_phone}).",
         )
     else:
         plan = ActionPlan(
             branch="escalation",
-            channel="email",
+            channel=escalation_channel,
             tone="firm",
-            reasoning="[MOCK] High/Critical risk or low payment probability.",
+            reasoning=f"[MOCK] High/Critical risk or low payment probability. "
+                      f"Channel={escalation_channel} (email on file: {has_email}, phone on file: {has_phone}).",
         )
 
     draft = None
     if plan.branch != "no_action":
         client = invoice.get("client_name", "there")
+        channel = plan.channel if plan.channel in ("email", "whatsapp", "sms") else "email"
         tone_opener = {
             "friendly": f"Hope you're doing well, {client}!",
             "firm": f"Hi {client}, following up on an overdue balance.",
@@ -111,9 +123,16 @@ def mock_run_sweep(invoice: dict) -> dict:
             "firm": "Could you confirm when this will be settled?",
             "urgent": "Please treat this as time-sensitive and confirm today.",
         }.get(plan.tone, "Let me know where this stands.")
-        draft = DraftedMessage(
-            subject=f"Invoice {invoice.get('invoice_id', 'N/A')} — outstanding balance",
-            body=(
+
+        if channel == "sms":
+            # Mirrors the real draft agent's sms rule: terse, no sign-off,
+            # link inline rather than on its own block of lines.
+            body = (
+                f"Invoice {invoice.get('invoice_id', 'N/A')} for INR {invoice['amount']:,.0f} "
+                f"is {invoice['days_overdue']} days past due. {closer} Pay here: {{{{PAYMENT_LINK}}}}"
+            )
+        else:
+            body = (
                 f"{tone_opener}\n\n"
                 f"Invoice {invoice.get('invoice_id', 'N/A')} for INR "
                 f"{invoice['amount']:,.0f} is {invoice['days_overdue']} days past due. "
@@ -122,8 +141,12 @@ def mock_run_sweep(invoice: dict) -> dict:
                 f"{{{{PAYMENT_LINK}}}}\n\n"
                 f"(Offline mode: this draft is templated rather than model-written. "
                 f"Set USE_MOCK=false to have the agent write it.)"
-            ),
-            channel=plan.channel if plan.channel in ("email", "whatsapp") else "email",
+            )
+
+        draft = DraftedMessage(
+            subject=f"Invoice {invoice.get('invoice_id', 'N/A')} — outstanding balance",
+            body=body,
+            channel=channel,
         )
 
     return {"risk": risk, "probability": probability, "plan": plan, "draft": draft}
@@ -138,6 +161,7 @@ def mock_approve_and_execute(
     """Mock version of execute.approve_and_execute — no send, no LLM reflection call."""
     c_name = client_name or extract_client_name_from_draft(draft)
     recipient_email = (invoice or {}).get("email") if isinstance(invoice, dict) else None
+    recipient_phone = (invoice or {}).get("phone") if isinstance(invoice, dict) else None
     invoice_id = (invoice or {}).get("invoice_id") if isinstance(invoice, dict) else None
 
     if not approved:
@@ -157,22 +181,29 @@ def mock_approve_and_execute(
             "subject": draft.subject,
             "body": draft.body,
             "recipient_email": recipient_email,
+            "recipient": recipient_email or recipient_phone,
             "status": "rejected",
             "real_send": False,
         })
         return {"status": "skipped", "reason": "rejected by human reviewer"}
 
-    print(f"[MOCK SEND via {draft.channel}] Subject: {draft.subject}" + (f" to {recipient_email}" if recipient_email else ""))
+    mock_recipient = recipient_email if draft.channel == "email" else recipient_phone
+    print(f"[MOCK SEND via {draft.channel}] Subject: {draft.subject}" + (f" to {mock_recipient}" if mock_recipient else ""))
 
-    # No real email ever goes out in mock mode (that's the whole point — zero
-    # cost, zero network calls), so there's no real client who could reply.
-    # Still open/track the conversation thread exactly like the real path
-    # does, so the negotiation loop's data flow and the Approval Gate UI can
-    # be fully exercised in mock mode by manually feeding it a crafted reply
-    # (see tests/test_negotiation.py) before ever flipping to real sending.
-    if invoice_id and draft.channel == "email":
-        start_conversation(invoice_id, client_name=c_name, recipient_email=recipient_email)
-        append_conversation_turn(invoice_id, role="agent", body=draft.body, subject=draft.subject)
+    # No real email/text ever goes out in mock mode (that's the whole point —
+    # zero cost, zero network calls), so there's no real client who could
+    # reply. Still open/track the conversation thread exactly like the real
+    # path does, so the negotiation loop's data flow and the Approval Gate UI
+    # can be fully exercised in mock mode by manually feeding it a crafted
+    # reply (see tests/test_negotiation.py) before ever flipping to real
+    # sending.
+    if invoice_id and draft.channel in ("email", "whatsapp", "sms"):
+        start_conversation(invoice_id, client_name=c_name, recipient_email=recipient_email, recipient_phone=recipient_phone)
+        append_conversation_turn(
+            invoice_id, role="agent", body=draft.body,
+            subject=draft.subject if draft.channel == "email" else None,
+            channel=draft.channel,
+        )
 
     # Deterministic mock rule (+2 for successful send).
     # Not real LLM reasoning — just a fixed, predictable mock delta so downstream
@@ -191,9 +222,10 @@ def mock_approve_and_execute(
         "invoice_id": invoice_id,
         "client_name": c_name,
         "channel": draft.channel,
-        "subject": draft.subject,
+        "subject": draft.subject if draft.channel == "email" else None,
         "body": draft.body,
-        "recipient_email": recipient_email,
+        "recipient_email": recipient_email if draft.channel == "email" else None,
+        "recipient": mock_recipient,
         "status": "sent (mock)",
         "real_send": False,
     })
@@ -230,10 +262,14 @@ def mock_handle_incoming_reply(reply: dict) -> dict:
     """Mock version of execute.handle_incoming_reply — no LLM call. Classifies
     the reply by simple keyword matching so the negotiation loop's three
     outcome branches (resolved / escalate_to_human / continue_negotiating)
-    are all reachable and demoable with USE_MOCK=true."""
+    are all reachable and demoable with USE_MOCK=true. `reply` may be
+    {invoice_id, body, subject, from_email} (email) or {invoice_id, body,
+    channel, from_phone} (WhatsApp/SMS, via mock_handle_incoming_text)."""
     invoice_id = reply.get("invoice_id")
     if not invoice_id:
         return {"status": "skipped", "reason": "no invoice tag found in subject"}
+
+    channel = reply.get("channel", "email")
 
     convo = get_conversation(invoice_id)
     if convo is None:
@@ -242,7 +278,7 @@ def mock_handle_incoming_reply(reply: dict) -> dict:
         return {"status": "skipped", "reason": f"conversation status is '{convo.get('status')}', not active"}
 
     body = reply.get("body", "")
-    append_conversation_turn(invoice_id, role="client", body=body, subject=reply.get("subject"))
+    append_conversation_turn(invoice_id, role="client", body=body, subject=reply.get("subject"), channel=channel)
 
     lowered = body.lower()
     client_name = convo.get("client_name")
@@ -255,25 +291,36 @@ def mock_handle_incoming_reply(reply: dict) -> dict:
         set_conversation_status(invoice_id, "escalated")
         return {"status": "escalate_to_human", "reasoning": "[MOCK] Reply contains a dispute/escalation keyword."}
 
-    reply_subject = f"Re: Invoice {invoice_id} follow-up [{invoice_id}]"
-    reply_body = (
-        f"Hi {client_name or 'there'},\n\n"
-        "Thanks for getting back to us. If a part-payment or a short installment "
-        "plan would help, let us know an amount and timeline that works and we'll "
-        "set it up.\n\n"
-        "The Accounts Team\n\n"
-        "(Offline mode: this reply is templated rather than model-written. Set "
-        "USE_MOCK=false to have the agent negotiate for real.)"
-    )
-    append_conversation_turn(invoice_id, role="agent", body=reply_body, subject=reply_subject)
+    if channel == "email":
+        reply_subject = f"Re: Invoice {invoice_id} follow-up [{invoice_id}]"
+        reply_body = (
+            f"Hi {client_name or 'there'},\n\n"
+            "Thanks for getting back to us. If a part-payment or a short installment "
+            "plan would help, let us know an amount and timeline that works and we'll "
+            "set it up.\n\n"
+            "The Accounts Team\n\n"
+            "(Offline mode: this reply is templated rather than model-written. Set "
+            "USE_MOCK=false to have the agent negotiate for real.)"
+        )
+    else:
+        reply_subject = None
+        reply_body = (
+            f"Thanks for the reply, {client_name or 'there'}. If a part-payment or short "
+            "plan would help, tell us an amount/timeline and we'll set it up. "
+            "(Offline mode — set USE_MOCK=false for a real negotiated reply.)"
+        )
+    append_conversation_turn(invoice_id, role="agent", body=reply_body, subject=reply_subject, channel=channel)
 
+    recipient_email = convo.get("recipient_email")
+    recipient_phone = convo.get("recipient_phone")
     record_message_history({
         "invoice_id": invoice_id,
         "client_name": client_name,
-        "channel": "email",
+        "channel": channel,
         "subject": reply_subject,
         "body": reply_body,
-        "recipient_email": convo.get("recipient_email"),
+        "recipient_email": recipient_email if channel == "email" else None,
+        "recipient": recipient_email or recipient_phone,
         "status": "drafted (pending review)",
         "real_send": False,
         "autonomous_reply": True,
@@ -284,3 +331,20 @@ def mock_handle_incoming_reply(reply: dict) -> dict:
         "reasoning": "[MOCK] No resolve/escalate keyword matched — proposing a templated plan.",
         "pending_human_review": True,
     }
+
+
+def mock_handle_incoming_text(from_phone: str, body: str, channel: str = "sms") -> dict:
+    """Mock version of execute.handle_incoming_text — resolves which invoice
+    an inbound WhatsApp/SMS belongs to (by [INV-XXXX] tag in the body, or by
+    phone-number lookup against tracked conversations) with zero LLM/network
+    calls, then hands off to mock_handle_incoming_reply above."""
+    tag_match = INVOICE_TAG_RE.search(body)
+    invoice_id = tag_match.group(1) if tag_match else find_active_conversation_by_phone(from_phone)
+
+    if not invoice_id:
+        return {"status": "skipped", "reason": "no matching conversation for this phone number", "from_phone": from_phone}
+
+    return mock_handle_incoming_reply({
+        "invoice_id": invoice_id, "body": body, "channel": channel,
+        "subject": None, "from_phone": from_phone,
+    })

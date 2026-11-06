@@ -83,6 +83,57 @@ documented). Everything here degrades gracefully with PayPal unconfigured
 (`GET /api/paypal/status` tells you the current state) — the rest of the
 pipeline still runs.
 
+## WhatsApp & SMS (multichannel outreach)
+
+Email was never going to be the only channel a collections agent needs —
+plenty of overdue clients are more likely to read a text. `agent/tools/sms_tools.py`
+sends real WhatsApp/SMS messages via Twilio, verified against the actually
+**installed `twilio` v9.13.0 package** (`Client(username=, password=)`,
+`client.messages.create(to=, from_=, body=)`) rather than written from
+memory. Whichever channel the plan agent picks, it only ever picks
+`whatsapp`/`sms` when a phone number is actually on file for that invoice —
+the agent is told explicitly which contact methods exist, so it can't draft
+a WhatsApp message to a client it has no number for.
+
+**The constraint that actually shaped this, found by reading Twilio's own
+docs instead of assuming WhatsApp works like email:** WhatsApp's Business
+API only allows a free-form, business-initiated message inside the
+**24-hour session window** opened by the client's own last inbound message.
+Outside that window, a business-initiated send requires a pre-approved
+message template — infrastructure this hackathon sandbox doesn't have. So
+`send_text_message(to_phone, body, opens_session)` encodes that rule at the
+one point it matters: `opens_session=True` (passed only when replying to a
+message the client just sent) allows a real WhatsApp send; everywhere else —
+the agent's first-ever outreach on an invoice, and every scheduled,
+unprompted message like an installment reminder — `opens_session` is
+`False` and the send always downgrades to plain SMS, which has no such
+window. This is the same "catch the real API constraint before demo day"
+instinct as the PayPal Invoicing 403 above, applied one phase earlier.
+
+An inbound text is matched back to its invoice the same two-tier way an
+inbound email is matched by its `[INV-XXXX]` subject tag: first by an
+`[INV-XXXX]` tag embedded in the message body (the agent's own outbound
+texts append `(Ref: [INV-XXXX])` so a reply that quotes it resolves
+instantly), falling back to a reverse lookup by phone number against active
+conversations (`agent/memory.py`'s `find_active_conversation_by_phone`) when
+no tag survived. From there it's the exact same channel-agnostic
+`handle_incoming_reply` that handles email replies — the negotiation logic
+doesn't know or care which channel a message arrived on, only
+`agent/memory.py`'s conversation record does (tracking `recipient_phone` and
+a per-turn `channel`).
+
+`POST /api/twilio/webhook` receives inbound WhatsApp/SMS the same way
+`POST /api/paypal/webhook` receives payment events: Twilio signs every
+request, the server verifies that signature (`twilio.validateRequest`)
+before trusting anything in the body, and rejects with `401` otherwise —
+`TWILIO_WEBHOOK_ALLOW_UNVERIFIED=true` is an explicit, documented escape
+hatch for local testing only, never for a real deployment. See
+`server/.env.example` for the Twilio credentials and sender numbers this
+needs (`TWILIO_WHATSAPP_FROM` for replies, `TWILIO_SMS_FROM` for everything
+else) — like PayPal and real email, this degrades gracefully when
+unconfigured: `GET /api/twilio/status` reports the current state, and
+outreach just stays on whichever channels **are** configured.
+
 ## What's here
 
 ```
@@ -91,7 +142,8 @@ agent/
 ├── tools/
 │   ├── risk.py           calculate_risk_score — ported from riskEngine.js
 │   ├── probability.py    predict_payment_probability — ported from probabilityEngine.js
-│   └── paypal_tools.py   create_paypal_order / get_paypal_order_status — PayPal's own Agent Toolkit
+│   ├── paypal_tools.py   create_paypal_order / get_paypal_order_status — PayPal's own Agent Toolkit
+│   └── sms_tools.py      send_text_message — real WhatsApp/SMS via Twilio
 ├── agents.py         Per-node Agent definitions (model, tools, prompts)
 ├── graph.py          The actual strands.multiagent.Graph wiring
 ├── execute.py        Phase 2: approve → send → reflect (post-graph)
@@ -214,14 +266,18 @@ without a rewrite.
 
 ## What's intentionally not here yet
 
-- **AgentCore Memory** — `agents.py` currently has no persistent
-  client memory; each run is stateless. Wire in AgentCore Memory (or
-  a Firestore-backed equivalent, per the build spec's porting map)
-  once you're deploying to AgentCore Runtime.
-- **Real send logic** — `execute.py`'s `send_message()` is a stub that
-  prints instead of calling Nodemailer/WhatsApp. Port
-  `emailService.js` in when you're ready.
-- **The Approval Gate UI** — `execute.py`'s `approve_and_execute()` is
-  the function your Express route calls when a human clicks
-  Approve/Reject in the dashboard; the UI panel itself isn't part of
-  this package.
+- **AI voice calls** — the next planned channel (a stretch goal beyond
+  WhatsApp/SMS): an outbound call that can actually hold a short
+  negotiation conversation, not just play a recording.
+- **Business-initiated WhatsApp templates** — Meta requires a
+  pre-approved message template for any WhatsApp send that doesn't fall
+  inside the client's 24-hour reply window (see "WhatsApp & SMS" above).
+  Getting one approved needs a verified WhatsApp Business/Meta account
+  this hackathon sandbox doesn't have, so first-touch outreach and
+  scheduled reminders always ride plain SMS instead — correct behavior
+  for this setup, not a shortcut taken by accident.
+- **AgentCore Runtime / Bedrock deployment** — the model-provider switch
+  in `agents.py` (see "Switching to Bedrock" above) means no code change
+  is needed to move off the Anthropic/Gemini API, but this hasn't
+  actually been deployed to Bedrock AgentCore Runtime for the bonus
+  scoring track.

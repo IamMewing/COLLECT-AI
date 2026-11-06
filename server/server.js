@@ -3,9 +3,10 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
+const twilio = require('twilio');
 require('dotenv').config();
 
-const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState } = require('./agentService');
+const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
 const { parseInvoiceCsv } = require('./csvImport');
@@ -44,6 +45,10 @@ app.use(
     },
   })
 );
+// Twilio posts inbound WhatsApp/SMS messages as a classic HTML form body
+// (application/x-www-form-urlencoded), not JSON — this only ever applies to
+// requests with that content type, so it's a no-op for every other route.
+app.use(express.urlencoded({ extended: false }));
 
 // ── Serve the built client in production (single-service deploy) ────────────
 // In local dev, the client runs separately via `npm run dev` on :5173 and this
@@ -284,6 +289,12 @@ app.post('/api/agent/invoices', async (req, res) => {
         details: `"${b.email}" doesn't look like a valid email address.`,
       });
     }
+    if (b.phone && !/^\+?[0-9\s().-]{7,20}$/.test(String(b.phone).trim())) {
+      return res.status(400).json({
+        error: 'Invalid phone',
+        details: `"${b.phone}" doesn't look like a valid phone number.`,
+      });
+    }
 
     const userInvoices = await store.loadUserInvoices();
     const nextNum = 2000 + userInvoices.length + 1;
@@ -309,6 +320,9 @@ app.post('/api/agent/invoices', async (req, res) => {
       // (not an empty string) when not given, so downstream email-presence
       // checks ("does this invoice have a real contact") stay simple.
       ...(b.email ? { email: String(b.email).trim() } : {}),
+      // Same reasoning as email above, for WhatsApp/SMS outreach
+      // (agent/tools/sms_tools.py) — omitted entirely when not given.
+      ...(b.phone ? { phone: String(b.phone).trim() } : {}),
     };
 
     await store.saveNewInvoice(invoice);
@@ -697,6 +711,95 @@ app.post('/api/paypal/webhook', async (req, res) => {
     // fine since PayPal retries failed webhook deliveries automatically.
     console.error('❌ [PayPal webhook] Failed:', error);
     res.status(500).json({ error: 'Webhook handling failed', details: error.message });
+  }
+});
+
+/**
+ * GET /api/twilio/status
+ * Mirrors GET /api/paypal/status — lets the UI show whether WhatsApp/SMS is
+ * actually wired up instead of silently falling back to the print-only stub
+ * (see agent/tools/sms_tools.py).
+ */
+app.get('/api/twilio/status', auth.requireAuth, (req, res) => {
+  res.json({
+    configured: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+    whatsapp_from_configured: Boolean(process.env.TWILIO_WHATSAPP_FROM),
+    sms_from_configured: Boolean(process.env.TWILIO_SMS_FROM),
+    webhook_unverified_allowed: (process.env.TWILIO_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true',
+  });
+});
+
+/**
+ * POST /api/twilio/webhook
+ * Twilio calls this the moment a client replies on WhatsApp or texts the
+ * configured SMS number — the push-based counterpart to the scheduled
+ * /api/agent/check-replies poll for email. Every inbound message runs
+ * through the exact same negotiation loop (agent/execute.py's
+ * handle_incoming_reply via handle_incoming_text) that email replies do.
+ *
+ * Signature verification needs TWILIO_AUTH_TOKEN (same credential used to
+ * send) — twilio.validateRequest hashes the exact URL Twilio called plus the
+ * parsed form body, so this must be registered AFTER the
+ * express.urlencoded() middleware above populates req.body. An unverified
+ * request is REFUSED, not processed-with-a-warning, same reasoning as the
+ * PayPal webhook above: anyone who finds this URL could otherwise inject
+ * fake client replies into a real negotiation thread. The one escape hatch
+ * is TWILIO_WEBHOOK_ALLOW_UNVERIFIED=true, for local testing without a
+ * publicly reachable URL for Twilio to actually sign against — it must
+ * never be true where this is actually internet-reachable.
+ */
+app.post('/api/twilio/webhook', async (req, res) => {
+  const respondEmptyTwiml = () => res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+  try {
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const signature = req.headers['x-twilio-signature'];
+    const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+    const verified = Boolean(authToken) && twilio.validateRequest(authToken, signature, fullUrl, req.body || {});
+    const allowUnverified = (process.env.TWILIO_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true';
+
+    if (!verified) {
+      const reason = authToken
+        ? 'signature verification failed'
+        : 'TWILIO_AUTH_TOKEN is not set, so there is nothing to verify the signature against';
+
+      if (!allowUnverified) {
+        console.warn(`⛔ [Twilio webhook] Rejected (401) — ${reason}.`);
+        return res.status(401).send('Signature not verified');
+      }
+      console.warn(
+        `⚠️  [Twilio webhook] UNVERIFIED message processed anyway — ${reason}. ` +
+        `TWILIO_WEBHOOK_ALLOW_UNVERIFIED is set; this must be unset wherever this server is internet-reachable.`
+      );
+    }
+
+    const rawFrom = req.body?.From || '';
+    const body = req.body?.Body || '';
+    const channel = rawFrom.startsWith('whatsapp:') ? 'whatsapp' : 'sms';
+    const fromPhone = rawFrom.replace(/^whatsapp:/, '');
+
+    console.log(`\n💬 [Twilio webhook] Inbound ${channel} from ${fromPhone}${verified ? ' [verified]' : ' [unverified]'}`);
+
+    if (!fromPhone || !body) {
+      console.warn('⚠️  [Twilio webhook] Missing From/Body — nothing to process.');
+      return respondEmptyTwiml();
+    }
+
+    const result = await handleIncomingText(fromPhone, body, channel);
+    console.log(`🔁 [Twilio webhook] Negotiation loop result for ${fromPhone}:`, result.status || result.reason || result);
+
+    // Empty TwiML: we handle the reply ourselves (asynchronously, via the
+    // negotiation loop above, which may or may not send something back
+    // depending on AUTO_APPROVE_NEGOTIATION) rather than letting Twilio's
+    // own auto-reply mechanism send anything.
+    respondEmptyTwiml();
+  } catch (error) {
+    console.error('❌ [Twilio webhook] Failed:', error);
+    // Still respond with valid (empty) TwiML even on failure — an HTTP error
+    // here just makes Twilio retry the same message later, which would
+    // re-run the negotiation loop on a reply that may have partially
+    // succeeded already.
+    respondEmptyTwiml();
   }
 });
 

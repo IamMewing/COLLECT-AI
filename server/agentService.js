@@ -199,6 +199,21 @@ async function getNegotiationState() {
   return callAgentBridge('negotiation_state', {});
 }
 
+/**
+ * Called by POST /api/twilio/webhook for every inbound WhatsApp/SMS message
+ * — the push-based counterpart to checkReplies' scheduled IMAP poll. Resolves
+ * which invoice the text belongs to (by an [INV-XXXX] tag in the body, or by
+ * matching the sender's phone against a tracked conversation) and runs it
+ * through the same negotiation loop email replies use.
+ *
+ * @param {string} fromPhone - E.164 sender number, 'whatsapp:' prefix already stripped.
+ * @param {string} body - The message text.
+ * @param {string} channel - 'whatsapp' | 'sms'.
+ */
+async function handleIncomingText(fromPhone, body, channel) {
+  return callAgentBridge('incoming_text', { from_phone: fromPhone, body, channel });
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
@@ -206,4 +221,5 @@ module.exports = {
   checkReplies,
   confirmInstallmentPaid,
   getNegotiationState,
+  handleIncomingText,
 };

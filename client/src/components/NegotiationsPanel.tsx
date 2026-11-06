@@ -32,6 +32,12 @@ const dueLabel = (iso: string): string => {
   return `due in ${days}d`;
 };
 
+const channelLabel = (channel?: string): string => {
+  if (channel === 'whatsapp') return 'WhatsApp';
+  if (channel === 'sms') return 'SMS';
+  return 'email';
+};
+
 const conversationTag = (status: Conversation['status']) => {
   if (status === 'escalated') return { className: 'tag tag--risk', icon: <Siren size={12} style={{ marginRight: 4 }} />, text: 'Escalated to human' };
   if (status === 'resolved') return { className: 'tag tag--paid', icon: null, text: 'Resolved' };
@@ -135,7 +141,7 @@ export const NegotiationsPanel: React.FC<NegotiationsPanelProps> = ({ refreshKey
 
       {!loading && !loadError && conversations.length === 0 && (
         <p className="body body--sm" style={{ opacity: 0.6, marginTop: 14 }}>
-          No reply threads yet — once a client replies to a real email, it'll show up here.
+          No reply threads yet — once a client replies by email, WhatsApp, or SMS, it'll show up here.
         </p>
       )}
 
@@ -161,7 +167,7 @@ export const NegotiationsPanel: React.FC<NegotiationsPanelProps> = ({ refreshKey
                   <span className={tag.className}>{tag.icon}{tag.text}</span>
                   <span className="mono pswp-odds" style={{ opacity: 0.65 }}>
                     <MessageSquare size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
-                    {c.turns.length} turn{c.turns.length === 1 ? '' : 's'}
+                    {c.turns.length} turn{c.turns.length === 1 ? '' : 's'} via {channelLabel(lastTurn?.channel)}
                     {lastTurn ? ` · last ${timeAgo(lastTurn.timestamp)}` : ''}
                   </span>
                   <ChevronDown size={14} className={`pswp-chev${open ? ' is-open' : ''}`} />
@@ -173,7 +179,7 @@ export const NegotiationsPanel: React.FC<NegotiationsPanelProps> = ({ refreshKey
                       <p key={i}>
                         <strong>{t.role === 'client' ? `${c.client_name || 'Client'} — ` : 'Agent — '}</strong>
                         <span style={{ whiteSpace: 'pre-wrap' }}>{t.body}</span>
-                        <span style={{ opacity: 0.5, fontSize: '0.78rem' }}> ({timeAgo(t.timestamp)})</span>
+                        <span style={{ opacity: 0.5, fontSize: '0.78rem' }}> (via {channelLabel(t.channel)}, {timeAgo(t.timestamp)})</span>
                       </p>
                     ))}
                   </div>

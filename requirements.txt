@@ -19,4 +19,11 @@ google-cloud-firestore>=2.19
 # they're deliberately not wired up — Orders is the API family already
 # confirmed working here.
 paypal-agent-toolkit>=1.11.0
+# Real WhatsApp/SMS sending (agent/tools/sms_tools.py) — verified against
+# v9.13.0 by installing it and inspecting the actual Client/messages.create
+# signatures in site-packages. See that module's docstring for the WhatsApp
+# 24-hour free-form-message session window this surfaced (and how it's
+# handled) — the same "the obvious API call isn't actually usable yet"
+# discovery process already applied to PayPal's Invoicing API above.
+twilio>=9.13.0
 

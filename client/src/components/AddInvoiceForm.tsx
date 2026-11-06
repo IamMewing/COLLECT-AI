@@ -11,6 +11,7 @@ interface AddInvoiceFormProps {
 export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreated }) => {
   const [clientName, setClientName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [amount, setAmount] = useState('');
   const [daysOverdue, setDaysOverdue] = useState('0');
   const [ignoredReminders, setIgnoredReminders] = useState('0');
@@ -29,6 +30,10 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
       setFormError("That email doesn't look right — double-check it or leave it blank.");
       return;
     }
+    if (phone.trim() && !/^\+?[0-9\s().-]{7,20}$/.test(phone.trim())) {
+      setFormError("That phone number doesn't look right — use E.164 (e.g. +14155550100) or leave it blank.");
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -40,6 +45,7 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
         relationship_score: Math.min(100, Math.max(0, Number(standing) || 75)),
         historical_on_time_rate: Math.min(100, Math.max(0, Number(onTimeRate) || 80)) / 100,
         ...(email.trim() ? { email: email.trim() } : {}),
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
       });
       onCreated(invoice);
     } catch (err: any) {
@@ -78,6 +84,18 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
             />
             <p className="mono" style={{ color: 'var(--muted)', fontSize: '0.72rem', marginTop: 4 }}>
               If you leave this blank, outreach for this invoice goes to the demo inbox instead of the real client.
+            </p>
+          </div>
+
+          <div>
+            <label className="lbl" htmlFor="af-phone">Their phone (optional)</label>
+            <input
+              id="af-phone" className="inp" type="tel" value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+14155550100"
+            />
+            <p className="mono" style={{ color: 'var(--muted)', fontSize: '0.72rem', marginTop: 4 }}>
+              Add this to let the agent reach them by WhatsApp or SMS, not just email — use the full international format (e.g. +1…).
             </p>
           </div>
 

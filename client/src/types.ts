@@ -1,6 +1,6 @@
 export type RiskCategory = 'Low' | 'Medium' | 'High' | 'Critical';
 export type PlanBranch = 'standard' | 'escalation' | 'no_action';
-export type CommunicationChannel = 'email' | 'whatsapp' | 'phone' | 'none';
+export type CommunicationChannel = 'email' | 'whatsapp' | 'sms' | 'phone' | 'none';
 export type CommunicationTone = 'friendly' | 'firm' | 'urgent' | 'none';
 
 export interface Invoice {
@@ -16,6 +16,10 @@ export interface Invoice {
    * the fixed demo inbox when SEND_REAL_EMAIL is on. Optional — invoices
    * without one (e.g. the curated sample set) still work exactly as before. */
   email?: string;
+  /** E.164 phone number (e.g. '+14155550100'), used as the WhatsApp/SMS send
+   * target via Twilio (agent/tools/sms_tools.py). Optional, same as email —
+   * the plan agent only ever picks a phone channel when this is set. */
+  phone?: string;
   status?: 'active' | 'paid';
   /** How this invoice was closed, when status is 'paid': 'paypal' means a
    * real PayPal webhook confirmed payment automatically; 'manual' means a
@@ -44,7 +48,7 @@ export interface ActionPlan {
 export interface DraftedMessage {
   subject: string;
   body: string;
-  channel: 'email' | 'whatsapp';
+  channel: 'email' | 'whatsapp' | 'sms';
 }
 
 export interface Reflection {
@@ -119,6 +123,9 @@ export interface ConversationTurn {
   role: 'agent' | 'client';
   subject: string | null;
   body: string;
+  /** Which channel this specific turn happened on — a thread can switch
+   *  mid-conversation (e.g. emailed, but the client replies on WhatsApp). */
+  channel?: 'email' | 'whatsapp' | 'sms';
   timestamp: string;
 }
 
@@ -126,6 +133,7 @@ export interface Conversation {
   invoice_id: string;
   client_name: string;
   recipient_email: string | null;
+  recipient_phone?: string | null;
   status: ConversationStatus;
   turns: ConversationTurn[];
   created_at: string;
@@ -168,13 +176,18 @@ export interface MessageHistoryEntry {
   invoice_id: string | null;
   client_name: string;
   channel: string;
-  subject: string;
+  /** Null for a whatsapp/sms entry — only email messages have a subject. */
+  subject: string | null;
   body: string;
-  /** Null when the invoice had no email on file, or on a rejected draft. */
+  /** Null unless channel is 'email' — kept for backward compatibility; use
+   *  `recipient` for a channel-agnostic "who this went to" value. */
   recipient_email?: string | null;
+  /** The contact actually used — an email address or a phone number,
+   *  whichever the channel called for. */
+  recipient?: string | null;
   /** e.g. 'sent (mock)', 'sent', 'rejected'. */
   status: string;
-  /** True only when SEND_REAL_EMAIL actually dispatched via SMTP. */
+  /** True only when a real send actually dispatched (SMTP or Twilio). */
   real_send: boolean;
   timestamp: string;
 }

@@ -394,18 +394,29 @@ def _save_conversation(invoice_id: str, record: dict[str, Any]) -> None:
     _save_conversations_store(store)
 
 
-def start_conversation(invoice_id: str, client_name: str, recipient_email: str | None) -> dict[str, Any]:
+def start_conversation(
+    invoice_id: str,
+    client_name: str,
+    recipient_email: str | None = None,
+    recipient_phone: str | None = None,
+) -> dict[str, Any]:
     """Get-or-create: called right after the first outreach for an invoice is
     actually sent. If a thread already exists (e.g. a previous round that got
     resolved or escalated), this reactivates it to 'active' rather than
     wiping its history — a client re-chased later should still see the
-    agent remember the earlier exchange."""
+    agent remember the earlier exchange.
+
+    recipient_phone (E.164, e.g. '+14155550100') is set when outreach went
+    out over WhatsApp/SMS (see agent/tools/sms_tools.py) — it's what lets
+    find_active_conversation_by_phone() match an inbound text back to this
+    thread, the same role recipient_email plays for inbound IMAP replies."""
     existing = get_conversation(invoice_id)
     now = datetime.now(timezone.utc).isoformat()
     if existing is not None:
         existing["status"] = "active"
         existing["updated_at"] = now
         existing["recipient_email"] = recipient_email or existing.get("recipient_email")
+        existing["recipient_phone"] = recipient_phone or existing.get("recipient_phone")
         _save_conversation(invoice_id, existing)
         return existing
 
@@ -413,6 +424,7 @@ def start_conversation(invoice_id: str, client_name: str, recipient_email: str |
         "invoice_id": invoice_id,
         "client_name": client_name,
         "recipient_email": recipient_email,
+        "recipient_phone": recipient_phone,
         "status": "active",
         "turns": [],
         "created_at": now,
@@ -423,26 +435,83 @@ def start_conversation(invoice_id: str, client_name: str, recipient_email: str |
 
 
 def append_conversation_turn(
-    invoice_id: str, role: str, body: str, subject: str | None = None
+    invoice_id: str, role: str, body: str, subject: str | None = None, channel: str = "email"
 ) -> dict[str, Any]:
     """Appends one turn ('agent' or 'client') to an invoice's conversation
     and persists it. Assumes start_conversation() has already been called
-    for this invoice — callers in execute.py guarantee that."""
+    for this invoice — callers in execute.py guarantee that.
+
+    channel ('email' | 'whatsapp' | 'sms') records which channel this
+    specific turn happened on — a thread can switch channels mid-conversation
+    (e.g. the agent emails, the client replies on WhatsApp instead), and the
+    UI's negotiation panel shows it per-turn rather than assuming one
+    channel for the whole thread."""
     record = get_conversation(invoice_id)
     if record is None:
         # Defensive fallback — should not normally happen, but a thread
         # must exist to append to rather than silently dropping a reply.
-        record = start_conversation(invoice_id, client_name="Unknown Client", recipient_email=None)
+        record = start_conversation(invoice_id, client_name="Unknown Client")
 
     record.setdefault("turns", []).append({
         "role": role,
         "subject": subject,
         "body": body,
+        "channel": channel,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     record["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_conversation(invoice_id, record)
     return record
+
+
+def _normalize_phone(phone: str) -> str:
+    """'whatsapp:+1 (415) 555-0100' -> '+14155550100' — strips the Twilio
+    whatsapp: prefix and any formatting punctuation, so a number stored at
+    outreach time matches one Twilio reports on an inbound webhook even if
+    formatted slightly differently."""
+    digits = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+    return digits
+
+
+def find_active_conversation_by_phone(phone: str) -> str | None:
+    """Reverse lookup for inbound WhatsApp/SMS: given the phone number Twilio
+    reports as the sender, find the most recently updated ACTIVE conversation
+    whose recipient_phone matches — the phone-based equivalent of matching an
+    email reply by its [INV-XXXX] subject tag. Only 'active' threads are
+    candidates, same reasoning as handle_incoming_reply's own status check:
+    a resolved/escalated thread shouldn't silently reopen just because the
+    same number texts again about something else."""
+    target = _normalize_phone(phone)
+    if not target:
+        return None
+
+    if _firestore_client is not None:
+        try:
+            docs = (
+                _firestore_client.collection("conversations")
+                .where("status", "==", "active")
+                .stream()
+            )
+            candidates = [d.to_dict() for d in docs]
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+            candidates = None
+    else:
+        candidates = None
+
+    if candidates is None:
+        candidates = [
+            r for r in _load_conversations_store().values() if r.get("status") == "active"
+        ]
+
+    matches = [
+        r for r in candidates
+        if r.get("recipient_phone") and _normalize_phone(r["recipient_phone"]) == target
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
+    return matches[0].get("invoice_id")
 
 
 def set_conversation_status(invoice_id: str, status: str) -> dict[str, Any] | None:

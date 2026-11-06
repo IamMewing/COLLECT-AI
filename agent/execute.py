@@ -25,8 +25,11 @@ from .memory import (
     create_payment_plan,
     update_installment,
     list_active_payment_plans,
+    find_active_conversation_by_phone,
 )
 from .tools.paypal_tools import create_paypal_order, save_installment_order_mapping
+from .tools.sms_tools import send_text_message
+from .inbox import INVOICE_TAG_RE
 
 
 def _tag_subject(subject: str, invoice_id: str | None) -> str:
@@ -44,26 +47,35 @@ def _tag_subject(subject: str, invoice_id: str | None) -> str:
     return f"[CollectAI] [{invoice_id}] {subject}"
 
 
+def _tag_body(body: str, invoice_id: str | None) -> str:
+    """The WhatsApp/SMS equivalent of _tag_subject: there's no subject line
+    on those channels, so the same '[INV-XXXX]' tag (INVOICE_TAG_RE, shared
+    with the email inbox poller) goes on its own short line at the end of
+    the body instead. This is a secondary matching path — the primary one
+    for inbound texts is find_active_conversation_by_phone(), since most
+    clients will just reply without echoing any of the original text — but
+    it costs one line and means a quoted/forwarded reply still matches."""
+    if not invoice_id:
+        return body
+    tag = f"[{invoice_id}]"
+    if tag in body:
+        return body
+    return f"{body}\n\n(Ref: {tag})"
+
+
 def send_message(
-    message: DraftedMessage, recipient_email: str | None = None, invoice_id: str | None = None
+    message: DraftedMessage,
+    recipient_email: str | None = None,
+    recipient_phone: str | None = None,
+    invoice_id: str | None = None,
+    opens_session: bool = False,
 ) -> dict:
-    """Sends the drafted message for real if SEND_REAL_EMAIL=true and SMTP
-    env vars are configured; otherwise falls back to the original
-    print-only stub. This fallback is deliberate — if credentials are
-    missing or misconfigured, the demo keeps working instead of crashing
-    the approve flow.
+    """Sends the drafted message for real if configured; otherwise falls
+    back to a print-only stub. This fallback is deliberate — if credentials
+    are missing or misconfigured, the demo keeps working instead of
+    crashing the approve flow.
 
-    Recipient priority: `recipient_email` (the invoice's own email, passed
-    in by approve_and_execute below) if set, otherwise DEMO_RECIPIENT_EMAIL
-    as a fallback — the curated sample invoices have no real client contact,
-    so there's nothing truthful to send "real" mail to for those; routing
-    them to your own inbox still proves the SMTP wiring works.
-
-    `invoice_id`, when given, gets woven into the subject as an "[INV-XXXX]"
-    tag (see _tag_subject) — this is what lets agent/inbox.py's reply poller
-    match an incoming reply back to this invoice's conversation thread.
-
-    Required env vars for real sending (channel == "email" only):
+    Email (channel == "email"): required env vars for real sending:
         SEND_REAL_EMAIL=true
         SMTP_HOST      (default: smtp.gmail.com)
         SMTP_PORT      (default: 587)
@@ -71,8 +83,17 @@ def send_message(
         SMTP_PASS      (an App Password — NOT your regular account password)
         DEMO_RECIPIENT_EMAIL  (fallback recipient when an invoice has no
                                email of its own — use your own inbox)
+    `invoice_id`, when given, gets woven into the subject as an "[INV-XXXX]"
+    tag (see _tag_subject) — this is what lets agent/inbox.py's reply poller
+    match an incoming reply back to this invoice's conversation thread.
 
-    WhatsApp is not wired to a real API — it still just logs.
+    WhatsApp/SMS (channel in ("whatsapp", "sms")): sent via
+    agent/tools/sms_tools.py if TWILIO_ACCOUNT_SID/AUTH_TOKEN are configured
+    and `recipient_phone` is given; otherwise falls back to the print stub.
+    `opens_session` should be True only when this message is a reply to one
+    the client just sent on WhatsApp/SMS (that inbound message is what opens
+    WhatsApp's 24h free-form window) — see sms_tools.send_text_message's
+    docstring for why this matters and what happens when it's False.
     """
     real_send_requested = os.environ.get("SEND_REAL_EMAIL", "false").lower() == "true"
 
@@ -108,10 +129,25 @@ def send_message(
             except Exception as exc:  # noqa: BLE001 - deliberately broad: never let a send failure break approval
                 print(f"[SEND via email] Real send FAILED ({exc}) — falling back to stub.", flush=True)
 
-    # Stub path (default, or fallback on missing config / send failure)
+    if message.channel in ("whatsapp", "sms"):
+        if recipient_phone:
+            result = send_text_message(
+                recipient_phone, _tag_body(message.body, invoice_id), opens_session=opens_session
+            )
+            return {
+                "status": result["status"],
+                "channel": message.channel,
+                "channel_used": result["channel_used"],
+                "real_send": result["real_send"],
+                "recipient": result["recipient"],
+                "message_sid": result.get("message_sid"),
+            }
+        print(f"[SEND via {message.channel}] No phone on file for this invoice — falling back to stub.", flush=True)
+
+    # Stub path (default, or fallback on missing config / send failure / no phone on file)
     print(f"[SEND via {message.channel}] Subject: {message.subject}")
     print(message.body)
-    return {"status": "sent", "channel": message.channel, "real_send": False, "recipient": recipient_email}
+    return {"status": "sent", "channel": message.channel, "real_send": False, "recipient": recipient_email or recipient_phone}
 
 
 def approve_and_execute(
@@ -139,6 +175,7 @@ def approve_and_execute(
     """
     c_name = client_name or extract_client_name_from_draft(message)
     recipient_email = (invoice or {}).get("email") or None
+    recipient_phone = (invoice or {}).get("phone") or None
     invoice_id = (invoice or {}).get("invoice_id")
 
     if not approved:
@@ -161,6 +198,7 @@ def approve_and_execute(
             "subject": message.subject,
             "body": message.body,
             "recipient_email": recipient_email,
+            "recipient": recipient_email or recipient_phone,
             "status": "rejected",
             "real_send": False,
         })
@@ -169,14 +207,28 @@ def approve_and_execute(
     if edited_body:
         message = message.model_copy(update={"body": edited_body})
 
-    send_result = send_message(message, recipient_email=recipient_email, invoice_id=invoice_id)
+    # First-ever outreach on an invoice is always business-initiated, never a
+    # reply to something the client just sent — so opens_session is always
+    # False here. For channel='whatsapp' that means send_message/sms_tools
+    # will actually send it as SMS instead (see sms_tools.send_text_message's
+    # docstring): a free-form WhatsApp message here would need a pre-approved
+    # template, which isn't something this demo has set up.
+    send_result = send_message(
+        message, recipient_email=recipient_email, recipient_phone=recipient_phone,
+        invoice_id=invoice_id, opens_session=False,
+    )
 
     # Open (or reactivate) this invoice's conversation thread so a reply the
     # client sends later can be picked up by the negotiation loop — see
-    # agent/inbox.py (reply polling) and handle_incoming_reply below.
-    if invoice_id and message.channel == "email":
-        start_conversation(invoice_id, client_name=c_name, recipient_email=send_result.get("recipient"))
-        append_conversation_turn(invoice_id, role="agent", body=message.body, subject=message.subject)
+    # agent/inbox.py (email) / the 'incoming_text' bridge action (WhatsApp/SMS)
+    # and handle_incoming_reply below.
+    if invoice_id and message.channel in ("email", "whatsapp", "sms"):
+        start_conversation(invoice_id, client_name=c_name, recipient_email=recipient_email, recipient_phone=recipient_phone)
+        append_conversation_turn(
+            invoice_id, role="agent", body=message.body,
+            subject=message.subject if message.channel == "email" else None,
+            channel=message.channel,
+        )
 
     reflect_agent = build_reflect_agent()
     reflect_result = reflect_agent(
@@ -203,7 +255,8 @@ def approve_and_execute(
         "channel": message.channel,
         "subject": message.subject,
         "body": message.body,
-        "recipient_email": send_result.get("recipient"),
+        "recipient_email": send_result.get("recipient") if message.channel == "email" else None,
+        "recipient": send_result.get("recipient"),
         "status": send_result.get("status"),
         "real_send": send_result.get("real_send", False),
     })
@@ -261,7 +314,11 @@ def record_payment_confirmed(
 def handle_incoming_reply(reply: dict) -> dict:
     """The autonomous negotiation loop's entry point. Called once per reply
     found by agent/inbox.py's check_for_replies() (via the 'check_replies'
-    bridge action) — `reply` is {invoice_id, from_email, subject, body}.
+    bridge action), or per text routed by handle_incoming_text() below
+    (via the 'incoming_text' bridge action — Twilio's WhatsApp/SMS webhook).
+    `reply` is {invoice_id, body, channel, subject, from_email, from_phone}
+    — subject/from_email are email-specific and None for a text; from_phone
+    is text-specific and None for an email.
 
     This is deliberately NOT gated behind a human approval by default: the
     whole point is an agent that reads what the client actually wrote and
@@ -275,11 +332,14 @@ def handle_incoming_reply(reply: dict) -> dict:
     if not invoice_id:
         return {"status": "skipped", "reason": "no invoice tag found in subject"}
 
+    channel = reply.get("channel", "email")
+
     convo = get_conversation(invoice_id)
     if convo is None:
         print(
-            f"[NEGOTIATE] Reply tagged {invoice_id} from {reply.get('from_email')} but no "
-            "tracked conversation exists for it — skipping.",
+            f"[NEGOTIATE] Reply tagged {invoice_id} from "
+            f"{reply.get('from_email') or reply.get('from_phone')} but no tracked "
+            "conversation exists for it — skipping.",
             flush=True,
         )
         return {"status": "skipped", "reason": "no tracked conversation for this invoice"}
@@ -287,12 +347,16 @@ def handle_incoming_reply(reply: dict) -> dict:
     if convo.get("status") != "active":
         return {"status": "skipped", "reason": f"conversation status is '{convo.get('status')}', not active"}
 
-    append_conversation_turn(invoice_id, role="client", body=reply.get("body", ""), subject=reply.get("subject"))
+    append_conversation_turn(
+        invoice_id, role="client", body=reply.get("body", ""), subject=reply.get("subject"), channel=channel
+    )
     convo = get_conversation(invoice_id)  # re-read so the thread below includes the turn just appended
 
     client_name = convo.get("client_name")
     thread_text = "\n\n".join(
-        f"[{turn.get('role', '?').upper()}] Subject: {turn.get('subject') or '(no subject)'}\n{turn.get('body', '')}"
+        f"[{turn.get('role', '?').upper()} via {turn.get('channel', 'email')}]"
+        + (f" Subject: {turn.get('subject')}" if turn.get("subject") else "")
+        + f"\n{turn.get('body', '')}"
         for turn in convo.get("turns", [])
     )
 
@@ -325,10 +389,10 @@ def handle_incoming_reply(reply: dict) -> dict:
         set_conversation_status(invoice_id, "escalated")
         return outcome
 
-    # continue_negotiating
-    reply_subject = decision.reply_subject or f"Re: Invoice {invoice_id} [{invoice_id}]"
+    # continue_negotiating — reply on the SAME channel the client just used.
+    reply_subject = (decision.reply_subject or f"Re: Invoice {invoice_id} [{invoice_id}]") if channel == "email" else None
     reply_body = decision.reply_body or ""
-    append_conversation_turn(invoice_id, role="agent", body=reply_body, subject=reply_subject)
+    append_conversation_turn(invoice_id, role="agent", body=reply_body, subject=reply_subject, channel=channel)
 
     # A concrete multi-installment plan the client just agreed to: persist it
     # so later installments get auto-billed as they come due (see
@@ -358,18 +422,28 @@ def handle_incoming_reply(reply: dict) -> dict:
 
     auto_send = os.environ.get("AUTO_APPROVE_NEGOTIATION", "false").lower() == "true"
     recipient_email = convo.get("recipient_email")
+    recipient_phone = convo.get("recipient_phone")
 
     if auto_send and reply_body:
-        draft = DraftedMessage(subject=reply_subject, body=reply_body, channel="email")
-        send_result = send_message(draft, recipient_email=recipient_email, invoice_id=invoice_id)
+        draft = DraftedMessage(subject=reply_subject or f"Re: {invoice_id}", body=reply_body, channel=channel)
+        # opens_session=True: this reply is going out BECAUSE the client just
+        # messaged on this same channel — for whatsapp that's exactly the
+        # event that opens the 24h free-form window, so a genuine WhatsApp
+        # body reply (not a downgrade to SMS) is appropriate here, unlike the
+        # very first, business-initiated message in approve_and_execute.
+        send_result = send_message(
+            draft, recipient_email=recipient_email, recipient_phone=recipient_phone,
+            invoice_id=invoice_id, opens_session=(channel != "email"),
+        )
         outcome["send_result"] = send_result
         record_message_history({
             "invoice_id": invoice_id,
             "client_name": client_name,
-            "channel": "email",
-            "subject": draft.subject,
+            "channel": channel,
+            "subject": draft.subject if channel == "email" else None,
             "body": draft.body,
-            "recipient_email": send_result.get("recipient"),
+            "recipient_email": send_result.get("recipient") if channel == "email" else None,
+            "recipient": send_result.get("recipient"),
             "status": send_result.get("status"),
             "real_send": send_result.get("real_send", False),
             "autonomous_reply": True,
@@ -379,16 +453,51 @@ def handle_incoming_reply(reply: dict) -> dict:
         record_message_history({
             "invoice_id": invoice_id,
             "client_name": client_name,
-            "channel": "email",
+            "channel": channel,
             "subject": reply_subject,
             "body": reply_body,
-            "recipient_email": recipient_email,
+            "recipient_email": recipient_email if channel == "email" else None,
+            "recipient": recipient_email or recipient_phone,
             "status": "drafted (pending review)",
             "real_send": False,
             "autonomous_reply": True,
         })
 
     return outcome
+
+
+def handle_incoming_text(from_phone: str, body: str, channel: str = "sms") -> dict:
+    """Entry point for an inbound WhatsApp/SMS message (Twilio's webhook,
+    relayed from server.js's POST /api/twilio/webhook via the
+    'incoming_text' bridge action) — the text-message equivalent of
+    agent/inbox.py's check_for_replies() for email.
+
+    Resolution order for which invoice this belongs to:
+      1. An '[INV-XXXX]' tag in the message body (the same tag
+         send_message/_tag_body appends to every outbound text) — covers a
+         client who quotes/forwards part of the original message back.
+      2. Otherwise, the most recently updated ACTIVE conversation whose
+         recipient_phone matches the sender — covers the common case of a
+         client just typing a fresh reply with no tag at all.
+    If neither resolves, there's no conversation to attach this to (a wrong
+    number, or a text with no prior outreach on file) — it's logged and
+    dropped rather than guessed at.
+
+    Once resolved, this is hands off to the exact same handle_incoming_reply
+    used for email — the negotiation/payment-plan logic doesn't care which
+    channel a reply arrived on, only memory.py's conversation record does.
+    """
+    tag_match = INVOICE_TAG_RE.search(body)
+    invoice_id = tag_match.group(1) if tag_match else find_active_conversation_by_phone(from_phone)
+
+    if not invoice_id:
+        print(f"[NEGOTIATE] Inbound {channel} from {from_phone} matched no active conversation — skipping.", flush=True)
+        return {"status": "skipped", "reason": "no matching conversation for this phone number", "from_phone": from_phone}
+
+    return handle_incoming_reply({
+        "invoice_id": invoice_id, "body": body, "channel": channel,
+        "subject": None, "from_email": None, "from_phone": from_phone,
+    })
 
 
 def process_due_installments() -> list[dict]:
@@ -408,6 +517,13 @@ def process_due_installments() -> list[dict]:
         client_name = plan.get("client_name")
         convo = get_conversation(invoice_id)
         recipient_email = convo.get("recipient_email") if convo else None
+        recipient_phone = convo.get("recipient_phone") if convo else None
+        # A billing reminder isn't a reply to anything the client just sent —
+        # it's business-initiated on a schedule — so it never risks a
+        # template-less WhatsApp send (see sms_tools.send_text_message):
+        # text-capable clients get it over SMS, which has no session-window
+        # restriction, and anyone without a phone on file still gets email.
+        bill_channel = "sms" if recipient_phone else "email"
 
         for installment in plan.get("installments", []):
             if installment.get("status") != "scheduled":
@@ -443,22 +559,37 @@ def process_due_installments() -> list[dict]:
             )
 
             subject = f"Payment due — {installment.get('description', invoice_id)} [{invoice_id}]"
-            body = (
-                f"Hi {client_name or 'there'},\n\n"
-                f"This is a scheduled payment from the plan we agreed on for invoice "
-                f"{invoice_id}: {installment.get('description', '')}.\n\n"
-                f"Pay instantly via PayPal: {order_result.get('payment_link') or '(link unavailable)'}\n\n"
-                "The Accounts Team"
+            link = order_result.get("payment_link") or "(link unavailable)"
+            if bill_channel == "email":
+                body = (
+                    f"Hi {client_name or 'there'},\n\n"
+                    f"This is a scheduled payment from the plan we agreed on for invoice "
+                    f"{invoice_id}: {installment.get('description', '')}.\n\n"
+                    f"Pay instantly via PayPal: {link}\n\n"
+                    "The Accounts Team"
+                )
+            else:
+                body = (
+                    f"Payment due: {installment.get('description', invoice_id)} for invoice {invoice_id}. "
+                    f"Pay instantly via PayPal: {link}"
+                )
+            draft = DraftedMessage(subject=subject, body=body, channel=bill_channel)
+            send_result = send_message(
+                draft, recipient_email=recipient_email, recipient_phone=recipient_phone,
+                invoice_id=invoice_id, opens_session=False,
             )
-            send_result = send_message(DraftedMessage(subject=subject, body=body, channel="email"), recipient_email=recipient_email, invoice_id=invoice_id)
-            append_conversation_turn(invoice_id, role="agent", body=body, subject=subject)
+            append_conversation_turn(
+                invoice_id, role="agent", body=body,
+                subject=subject if bill_channel == "email" else None, channel=bill_channel,
+            )
             record_message_history({
                 "invoice_id": invoice_id,
                 "client_name": client_name,
-                "channel": "email",
-                "subject": subject,
+                "channel": bill_channel,
+                "subject": subject if bill_channel == "email" else None,
                 "body": body,
-                "recipient_email": send_result.get("recipient"),
+                "recipient_email": send_result.get("recipient") if bill_channel == "email" else None,
+                "recipient": send_result.get("recipient"),
                 "status": send_result.get("status"),
                 "real_send": send_result.get("real_send", False),
                 "autonomous_reply": True,

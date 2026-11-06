@@ -23,3 +23,9 @@ public/assets/
 server/user_invoices.json
 server/invoice_status.json
 server/paypal_orders.json
+# Runtime-generated negotiation-loop stores (agent/memory.py's local-JSON
+# fallback) — client_memory.json is the one file here that's seeded source
+# data and stays tracked.
+agent/data/message_history.json
+agent/data/conversations.json
+agent/data/payment_plans.json

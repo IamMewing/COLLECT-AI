@@ -190,10 +190,20 @@ async function confirmInstallmentPaid(invoiceId, installmentIndex, paypalOrderId
   });
 }
 
+/**
+ * Read-only snapshot of every tracked conversation thread and payment plan,
+ * for the UI's negotiation panel (GET /api/agent/negotiations). Never
+ * changes anything server-side, unlike checkReplies/confirmInstallmentPaid.
+ */
+async function getNegotiationState() {
+  return callAgentBridge('negotiation_state', {});
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
   confirmPayment,
   checkReplies,
   confirmInstallmentPaid,
+  getNegotiationState,
 };

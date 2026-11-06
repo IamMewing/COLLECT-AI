@@ -107,6 +107,60 @@ export interface PortfolioSweepResult {
   summary: PortfolioSummary;
 }
 
+// ── Autonomous negotiation loop + payment plans ─────────────────────────────
+// Mirrors agent/memory.py's conversations/payment_plans stores exactly (see
+// start_conversation/append_conversation_turn and create_payment_plan/
+// update_installment) — this is read-only data from GET /api/agent/negotiations,
+// never constructed client-side.
+
+export type ConversationStatus = 'active' | 'resolved' | 'escalated';
+
+export interface ConversationTurn {
+  role: 'agent' | 'client';
+  subject: string | null;
+  body: string;
+  timestamp: string;
+}
+
+export interface Conversation {
+  invoice_id: string;
+  client_name: string;
+  recipient_email: string | null;
+  status: ConversationStatus;
+  turns: ConversationTurn[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type InstallmentStatus = 'scheduled' | 'awaiting_payment' | 'paid';
+
+export interface PlanInstallmentRecord {
+  index: number;
+  amount_usd: number;
+  description: string;
+  /** Absolute ISO timestamp — agent/execute.py converts the agent's
+   *  relative due_in_days to this when the plan is first persisted. */
+  due_at: string;
+  status: InstallmentStatus;
+  paypal_order_id?: string | null;
+  payment_link?: string | null;
+  paid_at?: string;
+}
+
+export interface PaymentPlan {
+  invoice_id: string;
+  client_name: string;
+  status: 'active' | 'completed';
+  installments: PlanInstallmentRecord[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NegotiationState {
+  conversations: Conversation[];
+  payment_plans: PaymentPlan[];
+}
+
 /** One entry in the agent's sent-message audit log (GET /api/history) —
  *  what was sent (or attempted), to whom, and what happened. Written by the
  *  Python agent on every approve/reject, mock or real. */

@@ -1,4 +1,4 @@
-import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioSweepResult, MessageHistoryEntry } from './types';
+import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioSweepResult, MessageHistoryEntry, NegotiationState } from './types';
 
 const API_BASE = '/api';
 
@@ -123,6 +123,28 @@ export async function fetchMessageHistory(limit = 100): Promise<MessageHistoryEn
   const res = await apiFetch(`/history?limit=${encodeURIComponent(String(limit))}`);
   const data = await handleResponse<{ entries: MessageHistoryEntry[] }>(res);
   return data.entries;
+}
+
+/** Every tracked conversation thread and payment plan, regardless of
+ *  status — what the Negotiations panel polls (GET /api/agent/negotiations).
+ *  Read-only: never triggers anything server-side. */
+export async function fetchNegotiations(): Promise<NegotiationState> {
+  const res = await apiFetch('/agent/negotiations');
+  return handleResponse<NegotiationState>(res);
+}
+
+/** Manually fires the same inbox-poll + due-installment-billing job Cloud
+ *  Scheduler would normally trigger on a timer (POST /api/agent/check-replies)
+ *  — so a live demo doesn't have to sit and wait out the schedule interval to
+ *  show a reply actually being handled. Safe to call anytime: idempotent on
+ *  an empty inbox / no due installments. */
+export async function triggerCheckReplies(): Promise<{
+  checked: number;
+  results: Array<Record<string, unknown>>;
+  billed_installments: Array<Record<string, unknown>>;
+}> {
+  const res = await apiFetch('/agent/check-replies', { method: 'POST' });
+  return handleResponse(res);
 }
 
 export async function checkPaypalStatus(): Promise<{

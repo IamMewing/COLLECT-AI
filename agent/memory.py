@@ -563,3 +563,29 @@ def list_active_payment_plans() -> list[dict[str, Any]]:
             _disable_firestore(e)
     store = _load_payment_plans_store()
     return [plan for plan in store.values() if plan.get("status") == "active"]
+
+
+def list_all_conversations() -> list[dict[str, Any]]:
+    """Every tracked conversation thread regardless of status (active,
+    resolved, escalated) — for the UI's negotiation panel, not for any
+    scheduled job (which only cares about 'active' ones)."""
+    if _firestore_client is not None:
+        try:
+            docs = _firestore_client.collection("conversations").stream()
+            return [d.to_dict() for d in docs]
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    return list(_load_conversations_store().values())
+
+
+def list_all_payment_plans() -> list[dict[str, Any]]:
+    """Every payment plan regardless of status — for the UI's negotiation
+    panel, which should still show a completed plan's history, not just
+    plans still in progress (see list_active_payment_plans for that)."""
+    if _firestore_client is not None:
+        try:
+            docs = _firestore_client.collection("payment_plans").stream()
+            return [d.to_dict() for d in docs]
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    return list(_load_payment_plans_store().values())

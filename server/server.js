@@ -5,7 +5,7 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid } = require('./agentService');
+const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
 const { parseInvoiceCsv } = require('./csvImport');
@@ -717,6 +717,27 @@ app.get('/api/history', async (req, res) => {
   } catch (error) {
     console.error('❌ [GET /api/history] Failed:', error);
     res.status(500).json({ error: 'Failed to load message history', details: error.message });
+  }
+});
+
+/**
+ * GET /api/agent/negotiations
+ * Read-only snapshot of every tracked conversation thread and payment plan
+ * (agent/memory.py's conversations/payment_plans stores) — what the UI's
+ * negotiation panel polls so a judge can actually watch a conversation and
+ * a plan's installments progress, instead of inferring it from scattered
+ * History-panel rows. Never triggers anything (unlike check-replies below).
+ */
+app.get('/api/agent/negotiations', async (req, res) => {
+  try {
+    const state = await getNegotiationState();
+    res.json(state);
+  } catch (error) {
+    console.error('❌ [GET /api/agent/negotiations] Failed:', error);
+    res.status(error.status || 500).json({
+      error: error.error || 'Failed to load negotiation state',
+      details: error.details || error.message || 'Unknown error occurred',
+    });
   }
 });
 

@@ -56,6 +56,16 @@ distinguishes an installment's order from a full-invoice one by a tag on
 the order mapping, so paying installment 1 of 3 is recorded as progress,
 not as the invoice being closed — only the last one marks it paid.
 
+None of this was visible in the UI until now — three phases of real
+backend work with nothing on screen to show for it. The dashboard's
+**"Still working it"** panel (`client/src/components/NegotiationsPanel.tsx`,
+reading `GET /api/agent/negotiations`) makes it watchable: every reply
+thread with its full back-and-forth, and every payment plan with each
+installment's status, amount, due date, and live PayPal link. A
+**"Check for replies now"** button fires the same job Cloud Scheduler would
+on a timer (`POST /api/agent/check-replies`), so a live demo doesn't have
+to sit out the polling interval to show a reply actually being handled.
+
 ## PayPal integration (agentic commerce)
 
 When a human approves the agent's drafted message, the server creates a

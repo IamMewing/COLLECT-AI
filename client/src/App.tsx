@@ -16,6 +16,7 @@ import { PortfolioSweep } from './components/PortfolioSweep';
 import { ApprovalGate } from './components/ApprovalGate';
 import { AddInvoiceForm } from './components/AddInvoiceForm';
 import { AgentHistory } from './components/AgentHistory';
+import { NegotiationsPanel } from './components/NegotiationsPanel';
 import { useInView } from './useInView';
 import { X } from 'lucide-react';
 
@@ -339,7 +340,17 @@ export const App: React.FC = () => {
           <AgentHistory refreshKey={historyRefreshKey} />
         </Field>
 
-        <Torn from="mint" to="ink" variant={2} />
+        <Torn from="mint" to="coral" variant={0} />
+        <Field
+          id="negotiations"
+          tone="coral"
+          marker="Still working it"
+          statement="It doesn’t stop at one reminder — it reads the reply and keeps going"
+        >
+          <NegotiationsPanel refreshKey={historyRefreshKey} />
+        </Field>
+
+        <Torn from="coral" to="ink" variant={1} />
         <footer className="field field--ink field--tight" data-field="ink">
           <div className="wrap">
             <h2 className="mega" style={{ marginBottom: 'clamp(28px, 4vw, 56px)' }}>Get paid.</h2>

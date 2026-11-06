@@ -276,6 +276,19 @@ def handle_installment_paid(payload: dict) -> dict:
     }
 
 
+def handle_negotiation_state(payload: dict) -> dict:
+    """Read-only snapshot for the UI's negotiation panel: every tracked
+    conversation thread and payment plan, regardless of status. Unlike
+    check_replies/installment_paid, this never changes anything — it's what
+    GET /api/agent/negotiations calls on every page load/refresh."""
+    from agent.memory import list_all_conversations, list_all_payment_plans
+
+    return {
+        "conversations": list_all_conversations(),
+        "payment_plans": list_all_payment_plans(),
+    }
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -300,10 +313,13 @@ def main():
                 res = handle_check_replies(payload)
             elif action == "installment_paid":
                 res = handle_installment_paid(payload)
+            elif action == "negotiation_state":
+                res = handle_negotiation_state(payload)
             else:
                 raise ValueError(
                     f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', "
-                    "'payment_confirmed', 'check_replies', and 'installment_paid'."
+                    "'payment_confirmed', 'check_replies', 'installment_paid', and "
+                    "'negotiation_state'."
                 )
 
         json.dump(res, sys.stdout)

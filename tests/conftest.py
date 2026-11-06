@@ -47,6 +47,7 @@ def isolated_agent_memory(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_module, "MEMORY_FILE", tmp_path / "client_memory.json")
     monkeypatch.setattr(memory_module, "HISTORY_FILE", tmp_path / "message_history.json")
     monkeypatch.setattr(memory_module, "CONVERSATIONS_FILE", tmp_path / "conversations.json")
+    monkeypatch.setattr(memory_module, "PAYMENT_PLANS_FILE", tmp_path / "payment_plans.json")
     # remember_invoice_score's cache is a plain module-level dict (not
     # file-backed), shared across the whole process — reset it too, or a
     # client name reused across tests could carry a score over.

@@ -32,6 +32,7 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 MEMORY_FILE = DATA_DIR / "client_memory.json"
 HISTORY_FILE = DATA_DIR / "message_history.json"
 CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
+PAYMENT_PLANS_FILE = DATA_DIR / "payment_plans.json"
 
 FIRESTORE_ENABLED = os.environ.get("FIRESTORE_ENABLED", "false").strip().lower() in ("true", "1", "yes")
 
@@ -453,3 +454,112 @@ def set_conversation_status(invoice_id: str, status: str) -> dict[str, Any] | No
     record["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_conversation(invoice_id, record)
     return record
+
+
+# ── Payment plans (multi-installment negotiated agreements) ─────────────────
+# One record per invoice, created when the negotiate agent's NegotiationTurn
+# comes back with 2+ installments (see agent/execute.py's
+# handle_incoming_reply). Each installment tracks its own status and PayPal
+# order independently, so paying installment 1 doesn't get mistaken for the
+# whole invoice being settled — see server.js's webhook handler, which reads
+# the order-mapping 'kind'/'installment_index' tag (agent/tools/paypal_tools.py)
+# to know which case it's in. Same Firestore-or-local-JSON pattern as
+# everything else here.
+
+
+def _load_payment_plans_store() -> dict[str, dict[str, Any]]:
+    _ensure_store_dir()
+    if not PAYMENT_PLANS_FILE.exists():
+        return {}
+    try:
+        with open(PAYMENT_PLANS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[MEMORY] Warning: Failed to read {PAYMENT_PLANS_FILE} ({e}). Initializing empty store.")
+        return {}
+
+
+def _save_payment_plans_store(store: dict[str, dict[str, Any]]) -> None:
+    _ensure_store_dir()
+    temp_file = PAYMENT_PLANS_FILE.with_suffix(".tmp")
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(store, f, indent=2, ensure_ascii=False)
+    temp_file.replace(PAYMENT_PLANS_FILE)
+
+
+def get_payment_plan(invoice_id: str) -> dict[str, Any] | None:
+    if not invoice_id:
+        return None
+    if _firestore_client is not None:
+        try:
+            doc = _firestore_client.collection("payment_plans").document(_sanitize_doc_id(invoice_id)).get()
+            return doc.to_dict() if doc.exists else None
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    return _load_payment_plans_store().get(invoice_id)
+
+
+def _save_payment_plan(invoice_id: str, record: dict[str, Any]) -> None:
+    if _firestore_client is not None:
+        try:
+            _firestore_client.collection("payment_plans").document(_sanitize_doc_id(invoice_id)).set(record)
+            return
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    store = _load_payment_plans_store()
+    store[invoice_id] = record
+    _save_payment_plans_store(store)
+
+
+def create_payment_plan(invoice_id: str, client_name: str, installments: list[dict[str, Any]]) -> dict[str, Any]:
+    """Creates (or replaces) an invoice's payment plan. Each item in
+    `installments` must already have amount_usd, due_at (absolute ISO
+    timestamp — agent/execute.py converts the agent's relative due_in_days
+    to this before calling here), description, and status ('scheduled' or
+    'awaiting_payment' for one already billed this turn)."""
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "invoice_id": invoice_id,
+        "client_name": client_name,
+        "status": "active",
+        "installments": installments,
+        "created_at": now,
+        "updated_at": now,
+    }
+    _save_payment_plan(invoice_id, record)
+    return record
+
+
+def update_installment(
+    invoice_id: str, installment_index: int, **fields: Any
+) -> dict[str, Any] | None:
+    """Merges `fields` into one installment (0-based index) of an invoice's
+    plan — e.g. update_installment(inv_id, 1, status='awaiting_payment',
+    paypal_order_id='...', payment_link='...'). Also rolls the plan's own
+    status to 'completed' once every installment is marked 'paid'."""
+    plan = get_payment_plan(invoice_id)
+    if plan is None or not (0 <= installment_index < len(plan.get("installments", []))):
+        return None
+
+    plan["installments"][installment_index].update(fields)
+    plan["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    if all(inst.get("status") == "paid" for inst in plan["installments"]):
+        plan["status"] = "completed"
+
+    _save_payment_plan(invoice_id, plan)
+    return plan
+
+
+def list_active_payment_plans() -> list[dict[str, Any]]:
+    """All plans still in progress — what agent/execute.py's
+    process_due_installments scans on each scheduled poll to find
+    installments that have come due."""
+    if _firestore_client is not None:
+        try:
+            docs = _firestore_client.collection("payment_plans").where("status", "==", "active").stream()
+            return [d.to_dict() for d in docs]
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    store = _load_payment_plans_store()
+    return [plan for plan in store.values() if plan.get("status") == "active"]

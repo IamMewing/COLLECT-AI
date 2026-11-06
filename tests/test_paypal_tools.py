@@ -95,7 +95,10 @@ def test_create_order_writes_the_mapping_the_node_webhook_handler_reads(monkeypa
     # a CHECKOUT.ORDER.APPROVED event for an order this module created back
     # to the right invoice, with zero changes needed on the Node side.
     saved = json.loads(mapping_path.read_text(encoding="utf-8"))
-    assert saved["PAYPAL-ORDER-999"] == {"invoice_id": "INV-5002", "client_name": "Acme Creative"}
+    # 'kind' defaults to 'full_invoice' for an order the agent creates ad hoc
+    # (a lump-sum agreement) — see test_payment_plans.py for the
+    # 'plan_installment' tagging path used for multi-installment plans.
+    assert saved["PAYPAL-ORDER-999"] == {"invoice_id": "INV-5002", "client_name": "Acme Creative", "kind": "full_invoice"}
 
 
 def test_create_order_with_no_approve_link_in_response_degrades_gracefully(monkeypatch, tmp_path):

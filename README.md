@@ -44,6 +44,18 @@ toolkit's invoicing tools hit the same `/v2/invoicing/invoices` endpoint
 that already 403'd on this project's sandbox account (see "Why Orders API
 instead of Invoicing" below), so they're deliberately left out.
 
+When the client agrees to pay in more than one installment, the agent
+commits to a real, structured plan rather than just a sentence describing
+one: each installment is tracked independently (`agent/memory.py`'s
+`payment_plans` store) with its own due date, status, and PayPal order.
+`POST /api/agent/check-replies` — the same scheduled call that polls for
+replies — also bills whichever installment has come due, minting its order
+and emailing the client a fresh real link with no further negotiation
+needed (`agent/execute.py`'s `process_due_installments`). The PayPal webhook
+distinguishes an installment's order from a full-invoice one by a tag on
+the order mapping, so paying installment 1 of 3 is recorded as progress,
+not as the invoice being closed — only the last one marks it paid.
+
 ## PayPal integration (agentic commerce)
 
 When a human approves the agent's drafted message, the server creates a

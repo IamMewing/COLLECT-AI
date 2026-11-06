@@ -60,8 +60,23 @@ if FIRESTORE_ENABLED:
         _firestore_client = None
 
 
-def _save_order_mapping(paypal_order_id: str, invoice_id: str, client_name: str) -> None:
-    mapping = {"invoice_id": invoice_id, "client_name": client_name}
+def _save_order_mapping(
+    paypal_order_id: str,
+    invoice_id: str,
+    client_name: str,
+    kind: str = "full_invoice",
+    installment_index: int | None = None,
+) -> None:
+    """kind distinguishes, for server.js's webhook handler, whether capturing
+    this order should close out the whole invoice ('full_invoice' — the
+    default, and the only shape Node's own order creation ever wrote before
+    this module existed) or just one installment of a multi-payment plan
+    ('plan_installment', with installment_index set) — see
+    save_installment_order_mapping below, agent/memory.py's update_installment,
+    and server.js's webhook branch."""
+    mapping: dict[str, Any] = {"invoice_id": invoice_id, "client_name": client_name, "kind": kind}
+    if installment_index is not None:
+        mapping["installment_index"] = installment_index
     if _firestore_client is not None:
         try:
             _firestore_client.collection("paypal_orders").document(paypal_order_id).set(mapping)
@@ -92,6 +107,23 @@ def _build_api() -> "PayPalAPI | None":
         return None
     sandbox = os.environ.get("PAYPAL_ENV", "sandbox").strip().lower() != "live"
     return PayPalAPI(client_id=client_id, secret=secret, context=Context(sandbox=sandbox))
+
+
+def save_installment_order_mapping(
+    paypal_order_id: str, invoice_id: str, client_name: str, installment_index: int
+) -> None:
+    """Plain Python helper (not an LLM tool) — agent/execute.py calls this to
+    re-tag an order's mapping as belonging to one specific installment of a
+    payment plan, either right after the negotiate agent creates installment
+    0's order inline, or after process_due_installments creates a later
+    one's order directly. Overwrites whatever _save_order_mapping wrote by
+    default (kind='full_invoice'), since the agent's own create_paypal_order
+    tool call has no way to know in advance it's part of a multi-installment
+    plan — that only becomes clear once the whole NegotiationTurn comes back."""
+    _save_order_mapping(
+        paypal_order_id, invoice_id=invoice_id, client_name=client_name,
+        kind="plan_installment", installment_index=installment_index,
+    )
 
 
 @tool

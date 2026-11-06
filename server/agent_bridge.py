@@ -40,6 +40,7 @@ from agent import (
     approve_and_execute,
     record_payment_confirmed,
     handle_incoming_reply,
+    process_due_installments,
     check_for_replies,
     DraftedMessage,
 )
@@ -224,9 +225,14 @@ def handle_payment_confirmed(payload: dict) -> dict:
 def handle_check_replies(payload: dict) -> dict:
     """Polls the inbox for client replies (agent/inbox.py) and runs each one
     through the autonomous negotiation loop (agent/execute.py's
-    handle_incoming_reply, or its mock counterpart). Meant to be called on a
-    schedule (see server.js's /api/agent/check-replies, triggered by Cloud
-    Scheduler) rather than once per page load.
+    handle_incoming_reply, or its mock counterpart), then — real mode only —
+    also bills any payment-plan installment that's come due
+    (process_due_installments). One scheduled call does both jobs; see
+    server.js's /api/agent/check-replies, triggered by Cloud Scheduler.
+    Payment plans are a real-mode-only feature (mock mode never sends real
+    email, so there's no real client who could agree to one in the first
+    place — see agent/mock.py's module docstring for the same reasoning
+    applied to the rest of mock mode).
     """
     replies = check_for_replies()
     results = []
@@ -243,7 +249,31 @@ def handle_check_replies(payload: dict) -> dict:
             "from_email": reply.get("from_email"),
             **outcome,
         })
-    return {"checked": len(replies), "results": results}
+
+    billed_installments = [] if USE_MOCK else process_due_installments()
+
+    return {"checked": len(replies), "results": results, "billed_installments": billed_installments}
+
+
+def handle_installment_paid(payload: dict) -> dict:
+    """Triggered by server.js's PayPal webhook handler when it captures an
+    order tagged 'plan_installment' (see agent/tools/paypal_tools.py) —
+    marks that one installment paid without closing out the rest of the
+    invoice's plan."""
+    invoice_id = payload.get("invoice_id")
+    installment_index = payload.get("installment_index")
+    paypal_order_id = payload.get("paypal_order_id")
+    if invoice_id is None or installment_index is None:
+        raise ValueError("Missing 'invoice_id' or 'installment_index' in installment_paid payload")
+
+    from agent import handle_installment_paid as _handle_installment_paid
+
+    outcome = _handle_installment_paid(invoice_id, int(installment_index), paypal_order_id)
+    return {
+        "status": outcome.get("status"),
+        "reflection": to_dict(outcome.get("reflection")),
+        "plan": outcome.get("plan"),
+    }
 
 
 def main():
@@ -268,10 +298,12 @@ def main():
                 res = handle_payment_confirmed(payload)
             elif action == "check_replies":
                 res = handle_check_replies(payload)
+            elif action == "installment_paid":
+                res = handle_installment_paid(payload)
             else:
                 raise ValueError(
                     f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', "
-                    "'payment_confirmed', and 'check_replies'."
+                    "'payment_confirmed', 'check_replies', and 'installment_paid'."
                 )
 
         json.dump(res, sys.stdout)

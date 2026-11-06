@@ -1,5 +1,11 @@
 from .graph import run_sweep, build_graph
-from .execute import approve_and_execute, record_payment_confirmed, handle_incoming_reply
+from .execute import (
+    approve_and_execute,
+    record_payment_confirmed,
+    handle_incoming_reply,
+    process_due_installments,
+    handle_installment_paid,
+)
 from .mock import mock_run_sweep, mock_approve_and_execute, mock_payment_confirmed, mock_handle_incoming_reply
 from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMessage, Reflection, NegotiationTurn
 from .memory import get_client_memory, update_client_memory, has_client_memory
@@ -11,6 +17,8 @@ __all__ = [
     "approve_and_execute",
     "record_payment_confirmed",
     "handle_incoming_reply",
+    "process_due_installments",
+    "handle_installment_paid",
     "mock_run_sweep",
     "mock_approve_and_execute",
     "mock_payment_confirmed",

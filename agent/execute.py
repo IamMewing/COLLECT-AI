@@ -9,6 +9,7 @@ graph's execution model when a plain function does the job clearly.
 
 import os
 import smtplib
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 
 from .agents import build_reflect_agent, build_negotiate_agent
@@ -21,7 +22,11 @@ from .memory import (
     start_conversation,
     append_conversation_turn,
     set_conversation_status,
+    create_payment_plan,
+    update_installment,
+    list_active_payment_plans,
 )
+from .tools.paypal_tools import create_paypal_order, save_installment_order_mapping
 
 
 def _tag_subject(subject: str, invoice_id: str | None) -> str:
@@ -325,6 +330,32 @@ def handle_incoming_reply(reply: dict) -> dict:
     reply_body = decision.reply_body or ""
     append_conversation_turn(invoice_id, role="agent", body=reply_body, subject=reply_subject)
 
+    # A concrete multi-installment plan the client just agreed to: persist it
+    # so later installments get auto-billed as they come due (see
+    # process_due_installments below). If the agent already minted installment
+    # 0's order this turn (decision.paypal_order_id set), record it as
+    # awaiting payment and re-tag the mapping as a plan installment rather
+    # than the generic full-invoice default create_paypal_order wrote — a
+    # client paying installment 1 of 3 should not close the whole invoice.
+    if decision.installments and len(decision.installments) >= 2:
+        now = datetime.now(timezone.utc)
+        installment_records = []
+        for i, inst in enumerate(decision.installments):
+            is_first_and_billed = i == 0 and decision.paypal_order_id
+            installment_records.append({
+                "index": i,
+                "amount_usd": inst.amount_usd,
+                "description": inst.description,
+                "due_at": (now + timedelta(days=inst.due_in_days)).isoformat(),
+                "status": "awaiting_payment" if is_first_and_billed else "scheduled",
+                "paypal_order_id": decision.paypal_order_id if is_first_and_billed else None,
+                "payment_link": decision.payment_link if is_first_and_billed else None,
+            })
+        create_payment_plan(invoice_id, client_name=client_name, installments=installment_records)
+        if decision.paypal_order_id:
+            save_installment_order_mapping(decision.paypal_order_id, invoice_id=invoice_id, client_name=client_name, installment_index=0)
+        outcome["payment_plan_created"] = True
+
     auto_send = os.environ.get("AUTO_APPROVE_NEGOTIATION", "false").lower() == "true"
     recipient_email = convo.get("recipient_email")
 
@@ -358,4 +389,116 @@ def handle_incoming_reply(reply: dict) -> dict:
         })
 
     return outcome
+
+
+def process_due_installments() -> list[dict]:
+    """Scans every active payment plan for an installment whose due date has
+    arrived and hasn't been billed yet, mints its real PayPal order, and
+    emails the client a fresh link — no LLM call needed, since the plan's
+    terms were already agreed when the negotiate agent created it. Meant to
+    run on the same schedule as check_for_replies (see agent_bridge.py's
+    handle_check_replies) — one Cloud Scheduler job progresses both the
+    negotiation inbox and any plans already in flight.
+    """
+    results = []
+    now = datetime.now(timezone.utc)
+
+    for plan in list_active_payment_plans():
+        invoice_id = plan["invoice_id"]
+        client_name = plan.get("client_name")
+        convo = get_conversation(invoice_id)
+        recipient_email = convo.get("recipient_email") if convo else None
+
+        for installment in plan.get("installments", []):
+            if installment.get("status") != "scheduled":
+                continue
+            try:
+                due_at = datetime.fromisoformat(installment["due_at"])
+            except Exception:  # noqa: BLE001 - a malformed due_at shouldn't crash the whole poll
+                continue
+            if due_at > now:
+                continue
+
+            index = installment["index"]
+            order_result = create_paypal_order(
+                invoice_id=invoice_id,
+                client_name=client_name,
+                amount_usd=installment["amount_usd"],
+                description=installment.get("description", f"Installment for {invoice_id}"),
+            )
+
+            if order_result.get("error"):
+                print(f"[PAYMENT_PLAN] Failed to bill installment {index} of {invoice_id}: {order_result['error']}", flush=True)
+                results.append({"invoice_id": invoice_id, "installment_index": index, "status": "billing_failed", "error": order_result["error"]})
+                continue
+
+            save_installment_order_mapping(
+                order_result["paypal_order_id"], invoice_id=invoice_id, client_name=client_name, installment_index=index,
+            )
+            update_installment(
+                invoice_id, index,
+                status="awaiting_payment",
+                paypal_order_id=order_result["paypal_order_id"],
+                payment_link=order_result.get("payment_link"),
+            )
+
+            subject = f"Payment due — {installment.get('description', invoice_id)} [{invoice_id}]"
+            body = (
+                f"Hi {client_name or 'there'},\n\n"
+                f"This is a scheduled payment from the plan we agreed on for invoice "
+                f"{invoice_id}: {installment.get('description', '')}.\n\n"
+                f"Pay instantly via PayPal: {order_result.get('payment_link') or '(link unavailable)'}\n\n"
+                "The Accounts Team"
+            )
+            send_result = send_message(DraftedMessage(subject=subject, body=body, channel="email"), recipient_email=recipient_email, invoice_id=invoice_id)
+            append_conversation_turn(invoice_id, role="agent", body=body, subject=subject)
+            record_message_history({
+                "invoice_id": invoice_id,
+                "client_name": client_name,
+                "channel": "email",
+                "subject": subject,
+                "body": body,
+                "recipient_email": send_result.get("recipient"),
+                "status": send_result.get("status"),
+                "real_send": send_result.get("real_send", False),
+                "autonomous_reply": True,
+            })
+
+            results.append({"invoice_id": invoice_id, "installment_index": index, "status": "billed", "paypal_order_id": order_result["paypal_order_id"]})
+
+    return results
+
+
+def handle_installment_paid(invoice_id: str, installment_index: int, paypal_order_id: str | None = None) -> dict:
+    """Called by server.js's PayPal webhook handler (via the 'installment_paid'
+    bridge action) when one installment's order is captured — deliberately
+    separate from record_payment_confirmed, which closes out the WHOLE
+    invoice. Paying installment 1 of 3 should read as progress, not
+    completion: the invoice itself is only marked paid once every
+    installment in the plan is.
+    """
+    plan = update_installment(invoice_id, installment_index, status="paid", paid_at=datetime.now(timezone.utc).isoformat())
+    if plan is None:
+        return {"status": "error", "reason": f"No payment plan / installment {installment_index} found for {invoice_id}"}
+
+    all_paid = plan.get("status") == "completed"
+    client_name = plan.get("client_name")
+
+    if all_paid:
+        reflection = Reflection(
+            was_best_decision=True,
+            suggested_tone_shift=f"Client completed the full negotiated payment plan for {invoice_id} — approach validated.",
+            suggested_relationship_delta=6,
+        )
+    else:
+        paid_count = sum(1 for i in plan.get("installments", []) if i.get("status") == "paid")
+        total = len(plan.get("installments", []))
+        reflection = Reflection(
+            was_best_decision=True,
+            suggested_tone_shift=f"Client paid installment {installment_index + 1} of {total} for {invoice_id} on schedule.",
+            suggested_relationship_delta=2,
+        )
+
+    record = update_client_memory(client_name, reflection, action_taken="payment_plan_installment_paid", invoice=None)
+    return {"status": "completed" if all_paid else "partial", "reflection": reflection, "client_memory": record, "plan": plan}
 

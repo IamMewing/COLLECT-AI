@@ -172,9 +172,28 @@ async function checkReplies() {
   return callAgentBridge('check_replies', {});
 }
 
+/**
+ * Called by the PayPal webhook handler when a captured order is tagged
+ * 'plan_installment' (see agent/tools/paypal_tools.py) — marks just that
+ * one installment paid instead of closing out the whole invoice, which is
+ * what confirmPayment above does for a single full-invoice order.
+ *
+ * @param {string} invoiceId
+ * @param {number} installmentIndex
+ * @param {string|null} paypalOrderId
+ */
+async function confirmInstallmentPaid(invoiceId, installmentIndex, paypalOrderId = null) {
+  return callAgentBridge('installment_paid', {
+    invoice_id: invoiceId,
+    installment_index: installmentIndex,
+    paypal_order_id: paypalOrderId,
+  });
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
   confirmPayment,
   checkReplies,
+  confirmInstallmentPaid,
 };

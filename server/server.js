@@ -5,7 +5,7 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const { runSweep, approveAndExecute, confirmPayment, checkReplies } = require('./agentService');
+const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
 const { parseInvoiceCsv } = require('./csvImport');
@@ -661,6 +661,25 @@ app.post('/api/paypal/webhook', async (req, res) => {
     if (captureResult?.status !== 'COMPLETED') {
       console.warn(`⚠️  [PayPal webhook] Capture for order ${ppOrderId} returned status ${captureResult?.status} — not marking paid.`);
       return res.status(200).json({ received: true, mapped: true, captured: false, status: captureResult?.status });
+    }
+
+    // An order the negotiate agent minted for one installment of a payment
+    // plan (agent/tools/paypal_tools.py tags its mapping 'plan_installment')
+    // must NOT close out the whole invoice the way a normal order does —
+    // paying installment 1 of 3 is progress, not completion. mapping.kind is
+    // absent on every mapping Node itself has ever written (the sweep/approve
+    // flow above), so that path is completely unaffected by this branch.
+    if (mapping.kind === 'plan_installment') {
+      const result = await confirmInstallmentPaid(mapping.invoice_id, mapping.installment_index, ppOrderId);
+      console.log(
+        `🔁 [PayPal webhook] Installment ${mapping.installment_index} of ${mapping.invoice_id} captured — plan status: ${result.status}.`
+      );
+      // Only the FINAL installment actually finishes the invoice.
+      if (result.status === 'completed') {
+        await store.markInvoicePaid(mapping.invoice_id, 'paypal');
+        console.log(`✅ [PayPal webhook] All installments paid — invoice ${mapping.invoice_id} marked paid.`);
+      }
+      return res.status(200).json({ received: true, mapped: true, captured: true, invoice_id: mapping.invoice_id, installment: mapping.installment_index, planStatus: result.status });
     }
 
     await store.markInvoicePaid(mapping.invoice_id, 'paypal');

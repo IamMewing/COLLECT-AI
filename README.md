@@ -7,6 +7,31 @@ inspecting the actual API (not written from memory) — every import,
 class, and method signature here has been checked against the real
 package.
 
+## Autonomous negotiation loop
+
+Sending one reminder and waiting isn't the whole job — a real collections
+process is back-and-forth. Once a message is approved and sent (real email,
+`SEND_REAL_EMAIL=true`), its subject carries an `[INV-XXXX]` tag. Polling
+`POST /api/agent/check-replies` reads the inbox over IMAP (the same Gmail
+App Password already used for sending — no extra setup), matches any reply
+back to its invoice by that tag, and hands the whole thread to a `negotiate`
+agent node that decides, on its own, whether to:
+
+- keep negotiating — and write the next reply itself, proposing a concrete
+  installment plan if the client can't pay in full,
+- consider it resolved (the client agreed or confirms payment was sent), or
+- escalate to a human (disputes, hostility, anything it shouldn't decide alone).
+
+`AUTO_APPROVE_NEGOTIATION=true` lets it send its own follow-ups unattended;
+left unset (the default), it still does all the reading and deciding, but
+queues the reply for review instead of sending it. See `agent/inbox.py`
+(IMAP polling + reply parsing), `agent/execute.py`'s `handle_incoming_reply`,
+and `agent/memory.py`'s conversation-thread storage. In production this is
+meant to run on a schedule — a Cloud Scheduler job hitting
+`/api/agent/check-replies` every few minutes, authenticated via the
+`X-Scheduler-Secret` header (see `server/.env.example`) since there's no
+browser session to present a cookie.
+
 ## PayPal integration (agentic commerce)
 
 When a human approves the agent's drafted message, the server creates a
@@ -34,8 +59,9 @@ agent/
 │   └── probability.py    predict_payment_probability — ported from probabilityEngine.js
 ├── agents.py         Per-node Agent definitions (model, tools, prompts)
 ├── graph.py          The actual strands.multiagent.Graph wiring
-└── execute.py        Phase 2: approve → send → reflect (post-graph)
-tests/                 pytest suite — risk/probability/branch logic, client memory
+├── execute.py        Phase 2: approve → send → reflect (post-graph)
+└── inbox.py          IMAP polling + reply parsing for the negotiation loop
+tests/                 pytest suite — risk/probability/branch logic, client memory, negotiation
 run_demo.py           End-to-end runnable example
 smoke_test.py         Verifies everything imports/builds without a real API key
 requirements.txt

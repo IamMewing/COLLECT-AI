@@ -106,6 +106,30 @@ function requireAuth(req, res, next) {
   });
 }
 
+// SCHEDULER_SECRET lets an unattended caller (Cloud Scheduler polling
+// /api/agent/check-replies on a timer) in without a browser session cookie
+// to present — there's no human at the other end to type the demo
+// password. Unset by default, same opt-in convention as everything else
+// here: with no secret configured, that route falls back to the normal
+// cookie gate like any other /api/agent/* route.
+const SCHEDULER_SECRET = process.env.SCHEDULER_SECRET || '';
+
+/** Constant-time comparison, same reasoning as checkPassword. */
+function checkSchedulerSecret(candidate) {
+  if (!SCHEDULER_SECRET) return false;
+  const a = Buffer.from(String(candidate ?? ''));
+  const b = Buffer.from(SCHEDULER_SECRET);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/** Like requireAuth, but also accepts a valid X-Scheduler-Secret header —
+ *  for the one route a scheduled job needs to call with no cookie at all. */
+function requireAuthOrSchedulerSecret(req, res, next) {
+  if (checkSchedulerSecret(req.get('X-Scheduler-Secret'))) return next();
+  return requireAuth(req, res, next);
+}
+
 module.exports = {
   AUTH_ENABLED,
   COOKIE_NAME,
@@ -114,4 +138,5 @@ module.exports = {
   checkPassword,
   makeSessionCookieValue,
   requireAuth,
+  requireAuthOrSchedulerSecret,
 };

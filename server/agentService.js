@@ -163,8 +163,18 @@ async function confirmPayment(clientName, invoice = null) {
   });
 }
 
+/**
+ * Polls the inbox for client replies and runs each one through the
+ * autonomous negotiation loop. Meant to be called on a schedule (Cloud
+ * Scheduler hitting /api/agent/check-replies), not from the UI directly.
+ */
+async function checkReplies() {
+  return callAgentBridge('check_replies', {});
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
   confirmPayment,
+  checkReplies,
 };

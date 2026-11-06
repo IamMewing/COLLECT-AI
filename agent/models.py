@@ -40,3 +40,24 @@ class Reflection(BaseModel):
     suggested_relationship_delta: int = Field(
         ge=-10, le=10, description="Adjustment to apply to the client's relationship score"
     )
+
+
+class NegotiationTurn(BaseModel):
+    """One decision in the autonomous negotiation loop (agent/execute.py's
+    handle_incoming_reply): given the whole conversation so far plus the
+    client's latest reply, decide whether to keep negotiating, consider the
+    matter resolved, or hand it to a human."""
+
+    outcome: Literal["continue_negotiating", "resolved", "escalate_to_human"]
+    reply_subject: str | None = Field(
+        default=None, description="Only set when outcome='continue_negotiating'"
+    )
+    reply_body: str | None = Field(
+        default=None, description="Only set when outcome='continue_negotiating'"
+    )
+    proposed_plan: str | None = Field(
+        default=None,
+        description="Human-readable summary of any payment plan being offered, "
+        "e.g. '3 installments of ₹20,000 starting Nov 15' — null if none.",
+    )
+    reasoning: str

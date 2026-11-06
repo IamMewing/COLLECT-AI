@@ -29,14 +29,14 @@ if str(REPO_ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def isolated_agent_memory(tmp_path, monkeypatch):
-    """Every test gets its own empty client-memory/message-history files
-    instead of touching agent/data/*.json — the files the actual running
-    demo reads and writes. Without this, a branch-logic test that calls
-    mock_run_sweep (which persists via agent.memory) would silently edit
-    the live demo's client relationship scores and message history every
-    time the suite runs, exactly the kind of test pollution this session
-    already hit once by hand (see the Firestore-fallback manual testing
-    earlier) and had to clean up after.
+    """Every test gets its own empty client-memory/message-history/
+    conversation files instead of touching agent/data/*.json — the files the
+    actual running demo reads and writes. Without this, a branch-logic test
+    that calls mock_run_sweep (which persists via agent.memory) would
+    silently edit the live demo's client relationship scores and message
+    history every time the suite runs, exactly the kind of test pollution
+    this session already hit once by hand (see the Firestore-fallback manual
+    testing earlier) and had to clean up after.
 
     autouse so every test file gets this automatically — nobody writing a
     new test here has to remember to ask for it.
@@ -46,6 +46,7 @@ def isolated_agent_memory(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(memory_module, "MEMORY_FILE", tmp_path / "client_memory.json")
     monkeypatch.setattr(memory_module, "HISTORY_FILE", tmp_path / "message_history.json")
+    monkeypatch.setattr(memory_module, "CONVERSATIONS_FILE", tmp_path / "conversations.json")
     # remember_invoice_score's cache is a plain module-level dict (not
     # file-backed), shared across the whole process — reset it too, or a
     # client name reused across tests could carry a score over.

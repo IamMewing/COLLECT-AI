@@ -16,7 +16,7 @@ from strands import Agent
 from strands.models.anthropic import AnthropicModel
 
 from .tools import calculate_risk_score, predict_payment_probability
-from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMessage, Reflection
+from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMessage, Reflection, NegotiationTurn
 
 MODEL_ID = os.environ.get("COLLECTAI_MODEL_ID", "claude-sonnet-4-6")
 
@@ -148,6 +148,49 @@ def build_draft_agent():
                 "wrap it in extra words, or omit it."
             ),
             structured_output_model=DraftedMessage,
+        )
+    )
+
+
+def build_negotiate_agent():
+    """The autonomous negotiation loop's decision-maker (agent/execute.py's
+    handle_incoming_reply). Given the whole conversation thread on one
+    invoice plus the client's latest reply, this agent is the one actually
+    reading what the client wrote and deciding what happens next — not a
+    human re-prompting the system each round. It can keep going (and write
+    the next reply itself), consider the matter resolved, or recognize when
+    something needs a human."""
+    return with_retry(
+        Agent(
+            name="negotiate",
+            model=get_model(),
+            system_prompt=(
+                "You are continuing a real email conversation with a client about an "
+                "overdue invoice, on behalf of the accounts team. You're given the full "
+                "thread so far (oldest first) ending with the client's latest message. "
+                "Decide one of three outcomes:\n\n"
+                "1. outcome='resolved' — the client has clearly agreed to pay (in full or "
+                "via a plan you already proposed) or confirms payment is already made. "
+                "Leave reply_subject/reply_body empty.\n"
+                "2. outcome='escalate_to_human' — the client disputes the invoice, raises "
+                "something you shouldn't decide alone (legal threats, a complaint about "
+                "the business, a request for a discount/write-off, confusion you can't "
+                "resolve from the thread alone), or is hostile. Leave reply_subject/"
+                "reply_body empty — a person will take it from here.\n"
+                "3. outcome='continue_negotiating' — anything else. Write the next reply "
+                "yourself: reply_subject and reply_body, matching a professional but "
+                "human tone, under 120 words, no bracketed placeholders, signed off as "
+                "'The Accounts Team'. If the client is asking for more time or can't pay "
+                "the full amount at once, propose a concrete installment plan (describe "
+                "it in both reply_body and proposed_plan) rather than just repeating the "
+                "original ask — a plan the client might actually accept is the point of "
+                "this conversation continuing at all.\n\n"
+                "IMPORTANT: reply_subject must end with the exact same '[INV-XXXX]' tag "
+                "that appears in the thread's subject lines — this is how later replies "
+                "get matched back to this conversation. Never drop or alter that tag.\n\n"
+                "Always explain your reasoning briefly in the reasoning field."
+            ),
+            structured_output_model=NegotiationTurn,
         )
     )
 

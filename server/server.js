@@ -5,7 +5,7 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const { runSweep, approveAndExecute, confirmPayment } = require('./agentService');
+const { runSweep, approveAndExecute, confirmPayment, checkReplies } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
 const { parseInvoiceCsv } = require('./csvImport');
@@ -182,11 +182,47 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ authenticated: false });
 });
 
+/**
+ * POST /api/agent/check-replies
+ * Polls the inbox for client replies and runs each one through the
+ * autonomous negotiation loop (see agent/inbox.py + agent/execute.py's
+ * handle_incoming_reply). Meant to be hit on a schedule — a Cloud Scheduler
+ * job every few minutes, since Cloud Run doesn't run a persistent
+ * background process — not from the UI.
+ *
+ * Registered here, ABOVE the `/api/agent` auth-prefix middleware below, with
+ * its own requireAuthOrSchedulerSecret so it fully handles the request and
+ * never reaches that prefix: an unattended scheduled job has no browser
+ * session cookie to present, only the X-Scheduler-Secret header (see
+ * server/auth.js). SCHEDULER_SECRET unset means this still falls back to
+ * the normal cookie gate, same as every other /api/agent/* route.
+ */
+app.post('/api/agent/check-replies', auth.requireAuthOrSchedulerSecret, agentLimiter, async (req, res) => {
+  try {
+    const result = await checkReplies();
+    console.log(
+      `\n📨 [POST /api/agent/check-replies] Checked inbox — ${result.checked} new repl${result.checked === 1 ? 'y' : 'ies'}.`
+    );
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [POST /api/agent/check-replies] Failed:', error);
+    res.status(error.status || 500).json({
+      error: error.error || 'Failed to check for replies',
+      details: error.details || error.message || 'Unknown error occurred',
+      stderr: error.stderr || null,
+      status: error.status || 500,
+    });
+  }
+});
+
 // Gates every /api/agent/* and /api/history route defined below this line,
 // plus /api/paypal/status — registered as path-prefix middleware so each
 // route doesn't need auth.requireAuth added individually (and can't be
 // accidentally left off a new one later). Must stay ABOVE those route
 // definitions; Express middleware only applies to routes registered after it.
+// (/api/agent/check-replies above is the one exception — it's registered
+// earlier than this line specifically so it is NOT gated by this plain
+// cookie-only check; see its own comment.)
 app.use('/api/agent', auth.requireAuth);
 app.use('/api/history', auth.requireAuth);
 

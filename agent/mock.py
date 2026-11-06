@@ -12,7 +12,7 @@ change when you switch over.
 
 from .tools.risk import calculate_risk_score
 from .tools.probability import predict_payment_probability
-from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMessage, Reflection
+from .models import RiskAssessment, ProbabilityAssessment, ActionPlan, DraftedMessage, Reflection, NegotiationTurn
 from .memory import (
     get_client_memory,
     update_client_memory,
@@ -20,6 +20,10 @@ from .memory import (
     remember_invoice_score,
     extract_client_name_from_draft,
     record_message_history,
+    get_conversation,
+    start_conversation,
+    append_conversation_turn,
+    set_conversation_status,
 )
 
 
@@ -160,6 +164,16 @@ def mock_approve_and_execute(
 
     print(f"[MOCK SEND via {draft.channel}] Subject: {draft.subject}" + (f" to {recipient_email}" if recipient_email else ""))
 
+    # No real email ever goes out in mock mode (that's the whole point — zero
+    # cost, zero network calls), so there's no real client who could reply.
+    # Still open/track the conversation thread exactly like the real path
+    # does, so the negotiation loop's data flow and the Approval Gate UI can
+    # be fully exercised in mock mode by manually feeding it a crafted reply
+    # (see tests/test_negotiation.py) before ever flipping to real sending.
+    if invoice_id and draft.channel == "email":
+        start_conversation(invoice_id, client_name=c_name, recipient_email=recipient_email)
+        append_conversation_turn(invoice_id, role="agent", body=draft.body, subject=draft.subject)
+
     # Deterministic mock rule (+2 for successful send).
     # Not real LLM reasoning — just a fixed, predictable mock delta so downstream
     # consumers have a reliable contract, not secretly smarter than the rest of mock.
@@ -202,3 +216,71 @@ def mock_payment_confirmed(client_name: str | None, invoice: dict | None = None)
     )
     record = update_client_memory(c_name, reflection, action_taken="payment_received_via_paypal", invoice=invoice)
     return {"status": "closed", "reflection": reflection, "client_memory": record}
+
+
+# Deterministic keyword buckets for mock_handle_incoming_reply — not real
+# language understanding, just enough signal to exercise all three outcome
+# branches without any model call, the same trade-off mock_run_sweep makes
+# for the risk/probability/plan pipeline.
+_RESOLVED_KEYWORDS = ("paid", "already sent", "just sent", "payment sent", "done", "settled")
+_ESCALATE_KEYWORDS = ("lawyer", "attorney", "unacceptable", "refuse", "dispute", "never received", "scam", "fraud")
+
+
+def mock_handle_incoming_reply(reply: dict) -> dict:
+    """Mock version of execute.handle_incoming_reply — no LLM call. Classifies
+    the reply by simple keyword matching so the negotiation loop's three
+    outcome branches (resolved / escalate_to_human / continue_negotiating)
+    are all reachable and demoable with USE_MOCK=true."""
+    invoice_id = reply.get("invoice_id")
+    if not invoice_id:
+        return {"status": "skipped", "reason": "no invoice tag found in subject"}
+
+    convo = get_conversation(invoice_id)
+    if convo is None:
+        return {"status": "skipped", "reason": "no tracked conversation for this invoice"}
+    if convo.get("status") != "active":
+        return {"status": "skipped", "reason": f"conversation status is '{convo.get('status')}', not active"}
+
+    body = reply.get("body", "")
+    append_conversation_turn(invoice_id, role="client", body=body, subject=reply.get("subject"))
+
+    lowered = body.lower()
+    client_name = convo.get("client_name")
+
+    if any(kw in lowered for kw in _RESOLVED_KEYWORDS):
+        set_conversation_status(invoice_id, "resolved")
+        return {"status": "resolved", "reasoning": "[MOCK] Reply indicates payment was already made."}
+
+    if any(kw in lowered for kw in _ESCALATE_KEYWORDS):
+        set_conversation_status(invoice_id, "escalated")
+        return {"status": "escalate_to_human", "reasoning": "[MOCK] Reply contains a dispute/escalation keyword."}
+
+    reply_subject = f"Re: Invoice {invoice_id} follow-up [{invoice_id}]"
+    reply_body = (
+        f"Hi {client_name or 'there'},\n\n"
+        "Thanks for getting back to us. If a part-payment or a short installment "
+        "plan would help, let us know an amount and timeline that works and we'll "
+        "set it up.\n\n"
+        "The Accounts Team\n\n"
+        "(Offline mode: this reply is templated rather than model-written. Set "
+        "USE_MOCK=false to have the agent negotiate for real.)"
+    )
+    append_conversation_turn(invoice_id, role="agent", body=reply_body, subject=reply_subject)
+
+    record_message_history({
+        "invoice_id": invoice_id,
+        "client_name": client_name,
+        "channel": "email",
+        "subject": reply_subject,
+        "body": reply_body,
+        "recipient_email": convo.get("recipient_email"),
+        "status": "drafted (pending review)",
+        "real_send": False,
+        "autonomous_reply": True,
+    })
+
+    return {
+        "status": "continue_negotiating",
+        "reasoning": "[MOCK] No resolve/escalate keyword matched — proposing a templated plan.",
+        "pending_human_review": True,
+    }

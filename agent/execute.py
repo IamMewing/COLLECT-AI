@@ -11,12 +11,37 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 
-from .agents import build_reflect_agent
-from .models import DraftedMessage, Reflection
-from .memory import update_client_memory, extract_client_name_from_draft, record_message_history
+from .agents import build_reflect_agent, build_negotiate_agent
+from .models import DraftedMessage, Reflection, NegotiationTurn
+from .memory import (
+    update_client_memory,
+    extract_client_name_from_draft,
+    record_message_history,
+    get_conversation,
+    start_conversation,
+    append_conversation_turn,
+    set_conversation_status,
+)
 
 
-def send_message(message: DraftedMessage, recipient_email: str | None = None) -> dict:
+def _tag_subject(subject: str, invoice_id: str | None) -> str:
+    """Every outbound email's subject carries an '[INV-XXXX]' tag so a
+    client's reply (which almost always preserves the subject, prefixed
+    with 'Re:') can be matched back to the right conversation by
+    agent/inbox.py without relying on header threading. Idempotent — if the
+    tag is already present (e.g. a negotiation reply whose subject the
+    negotiate agent wrote itself), it isn't duplicated."""
+    if not invoice_id:
+        return f"[CollectAI demo] {subject}"
+    tag = f"[{invoice_id}]"
+    if tag in subject:
+        return f"[CollectAI] {subject}"
+    return f"[CollectAI] [{invoice_id}] {subject}"
+
+
+def send_message(
+    message: DraftedMessage, recipient_email: str | None = None, invoice_id: str | None = None
+) -> dict:
     """Sends the drafted message for real if SEND_REAL_EMAIL=true and SMTP
     env vars are configured; otherwise falls back to the original
     print-only stub. This fallback is deliberate — if credentials are
@@ -28,6 +53,10 @@ def send_message(message: DraftedMessage, recipient_email: str | None = None) ->
     as a fallback — the curated sample invoices have no real client contact,
     so there's nothing truthful to send "real" mail to for those; routing
     them to your own inbox still proves the SMTP wiring works.
+
+    `invoice_id`, when given, gets woven into the subject as an "[INV-XXXX]"
+    tag (see _tag_subject) — this is what lets agent/inbox.py's reply poller
+    match an incoming reply back to this invoice's conversation thread.
 
     Required env vars for real sending (channel == "email" only):
         SEND_REAL_EMAIL=true
@@ -60,7 +89,7 @@ def send_message(message: DraftedMessage, recipient_email: str | None = None) ->
                 port = int(os.environ.get("SMTP_PORT", "587"))
 
                 mime_msg = MIMEText(message.body)
-                mime_msg["Subject"] = f"[CollectAI demo] {message.subject}"
+                mime_msg["Subject"] = _tag_subject(message.subject, invoice_id)
                 mime_msg["From"] = smtp_user
                 mime_msg["To"] = recipient
 
@@ -135,7 +164,14 @@ def approve_and_execute(
     if edited_body:
         message = message.model_copy(update={"body": edited_body})
 
-    send_result = send_message(message, recipient_email=recipient_email)
+    send_result = send_message(message, recipient_email=recipient_email, invoice_id=invoice_id)
+
+    # Open (or reactivate) this invoice's conversation thread so a reply the
+    # client sends later can be picked up by the negotiation loop — see
+    # agent/inbox.py (reply polling) and handle_incoming_reply below.
+    if invoice_id and message.channel == "email":
+        start_conversation(invoice_id, client_name=c_name, recipient_email=send_result.get("recipient"))
+        append_conversation_turn(invoice_id, role="agent", body=message.body, subject=message.subject)
 
     reflect_agent = build_reflect_agent()
     reflect_result = reflect_agent(
@@ -215,4 +251,111 @@ def record_payment_confirmed(
     )
 
     return {"status": "closed", "reflection": reflection, "client_memory": record}
+
+
+def handle_incoming_reply(reply: dict) -> dict:
+    """The autonomous negotiation loop's entry point. Called once per reply
+    found by agent/inbox.py's check_for_replies() (via the 'check_replies'
+    bridge action) — `reply` is {invoice_id, from_email, subject, body}.
+
+    This is deliberately NOT gated behind a human approval by default: the
+    whole point is an agent that reads what the client actually wrote and
+    decides what to do next on its own. Set AUTO_APPROVE_NEGOTIATION=true to
+    let it send its own follow-up replies unattended; left unset (the safe
+    default), it still does all the reading and deciding itself, but queues
+    the reply it would have sent rather than dispatching it — visible in the
+    conversation record and the History panel as a pending autonomous turn.
+    """
+    invoice_id = reply.get("invoice_id")
+    if not invoice_id:
+        return {"status": "skipped", "reason": "no invoice tag found in subject"}
+
+    convo = get_conversation(invoice_id)
+    if convo is None:
+        print(
+            f"[NEGOTIATE] Reply tagged {invoice_id} from {reply.get('from_email')} but no "
+            "tracked conversation exists for it — skipping.",
+            flush=True,
+        )
+        return {"status": "skipped", "reason": "no tracked conversation for this invoice"}
+
+    if convo.get("status") != "active":
+        return {"status": "skipped", "reason": f"conversation status is '{convo.get('status')}', not active"}
+
+    append_conversation_turn(invoice_id, role="client", body=reply.get("body", ""), subject=reply.get("subject"))
+    convo = get_conversation(invoice_id)  # re-read so the thread below includes the turn just appended
+
+    client_name = convo.get("client_name")
+    thread_text = "\n\n".join(
+        f"[{turn.get('role', '?').upper()}] Subject: {turn.get('subject') or '(no subject)'}\n{turn.get('body', '')}"
+        for turn in convo.get("turns", [])
+    )
+
+    negotiate_agent = build_negotiate_agent()
+    context = (
+        f"Invoice {invoice_id}, client \"{client_name}\".\n\n"
+        f"Full thread so far (oldest first):\n\n{thread_text}\n\n"
+        "Decide the outcome for this latest client message, per your instructions."
+    )
+
+    try:
+        result = negotiate_agent(context)
+        decision: NegotiationTurn = result.structured_output
+    except Exception as exc:  # noqa: BLE001 - a flaky model call must never crash the whole reply-check sweep
+        print(f"[NEGOTIATE] LLM call failed for {invoice_id} ({exc}) — escalating to a human instead of guessing.", flush=True)
+        set_conversation_status(invoice_id, "escalated")
+        return {"status": "escalate_to_human", "reason": f"negotiation agent call failed: {exc}"}
+
+    outcome: dict = {
+        "status": decision.outcome,
+        "reasoning": decision.reasoning,
+        "proposed_plan": decision.proposed_plan,
+    }
+
+    if decision.outcome == "resolved":
+        set_conversation_status(invoice_id, "resolved")
+        return outcome
+
+    if decision.outcome == "escalate_to_human":
+        set_conversation_status(invoice_id, "escalated")
+        return outcome
+
+    # continue_negotiating
+    reply_subject = decision.reply_subject or f"Re: Invoice {invoice_id} [{invoice_id}]"
+    reply_body = decision.reply_body or ""
+    append_conversation_turn(invoice_id, role="agent", body=reply_body, subject=reply_subject)
+
+    auto_send = os.environ.get("AUTO_APPROVE_NEGOTIATION", "false").lower() == "true"
+    recipient_email = convo.get("recipient_email")
+
+    if auto_send and reply_body:
+        draft = DraftedMessage(subject=reply_subject, body=reply_body, channel="email")
+        send_result = send_message(draft, recipient_email=recipient_email, invoice_id=invoice_id)
+        outcome["send_result"] = send_result
+        record_message_history({
+            "invoice_id": invoice_id,
+            "client_name": client_name,
+            "channel": "email",
+            "subject": draft.subject,
+            "body": draft.body,
+            "recipient_email": send_result.get("recipient"),
+            "status": send_result.get("status"),
+            "real_send": send_result.get("real_send", False),
+            "autonomous_reply": True,
+        })
+    else:
+        outcome["pending_human_review"] = True
+        record_message_history({
+            "invoice_id": invoice_id,
+            "client_name": client_name,
+            "channel": "email",
+            "subject": reply_subject,
+            "body": reply_body,
+            "recipient_email": recipient_email,
+            "status": "drafted (pending review)",
+            "real_send": False,
+            "autonomous_reply": True,
+        })
+
+    return outcome
 

@@ -31,6 +31,7 @@ from typing import Any
 DATA_DIR = Path(__file__).resolve().parent / "data"
 MEMORY_FILE = DATA_DIR / "client_memory.json"
 HISTORY_FILE = DATA_DIR / "message_history.json"
+CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
 
 FIRESTORE_ENABLED = os.environ.get("FIRESTORE_ENABLED", "false").strip().lower() in ("true", "1", "yes")
 
@@ -333,3 +334,122 @@ def extract_client_name_from_draft(draft: Any) -> str:
     if match:
         return match.group(1).strip()
     return "Unknown Client"
+
+
+# ── Conversation threads (autonomous negotiation loop) ──────────────────────
+# Keyed by invoice_id. One record per invoice tracks the back-and-forth once
+# the first outreach is sent: who to reply to, every turn in order, and a
+# status the inbox poller (agent/inbox.py) and the negotiate agent
+# (agent/execute.py's handle_incoming_reply) use to decide whether an
+# incoming email is even still something to act on. Same Firestore-or-
+# local-JSON pattern as everything else in this file, so it degrades the
+# same way if Firestore isn't configured or fails at runtime.
+
+
+def _load_conversations_store() -> dict[str, dict[str, Any]]:
+    _ensure_store_dir()
+    if not CONVERSATIONS_FILE.exists():
+        return {}
+    try:
+        with open(CONVERSATIONS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[MEMORY] Warning: Failed to read {CONVERSATIONS_FILE} ({e}). Initializing empty store.")
+        return {}
+
+
+def _save_conversations_store(store: dict[str, dict[str, Any]]) -> None:
+    _ensure_store_dir()
+    temp_file = CONVERSATIONS_FILE.with_suffix(".tmp")
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(store, f, indent=2, ensure_ascii=False)
+    temp_file.replace(CONVERSATIONS_FILE)
+
+
+def get_conversation(invoice_id: str) -> dict[str, Any] | None:
+    """One invoice's conversation record, or None if outreach hasn't started
+    a tracked thread for it yet (e.g. it was never sent, or was sent before
+    this feature existed)."""
+    if not invoice_id:
+        return None
+    if _firestore_client is not None:
+        try:
+            doc = _firestore_client.collection("conversations").document(_sanitize_doc_id(invoice_id)).get()
+            return doc.to_dict() if doc.exists else None
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    return _load_conversations_store().get(invoice_id)
+
+
+def _save_conversation(invoice_id: str, record: dict[str, Any]) -> None:
+    if _firestore_client is not None:
+        try:
+            _firestore_client.collection("conversations").document(_sanitize_doc_id(invoice_id)).set(record)
+            return
+        except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the bridge
+            _disable_firestore(e)
+    store = _load_conversations_store()
+    store[invoice_id] = record
+    _save_conversations_store(store)
+
+
+def start_conversation(invoice_id: str, client_name: str, recipient_email: str | None) -> dict[str, Any]:
+    """Get-or-create: called right after the first outreach for an invoice is
+    actually sent. If a thread already exists (e.g. a previous round that got
+    resolved or escalated), this reactivates it to 'active' rather than
+    wiping its history — a client re-chased later should still see the
+    agent remember the earlier exchange."""
+    existing = get_conversation(invoice_id)
+    now = datetime.now(timezone.utc).isoformat()
+    if existing is not None:
+        existing["status"] = "active"
+        existing["updated_at"] = now
+        existing["recipient_email"] = recipient_email or existing.get("recipient_email")
+        _save_conversation(invoice_id, existing)
+        return existing
+
+    record = {
+        "invoice_id": invoice_id,
+        "client_name": client_name,
+        "recipient_email": recipient_email,
+        "status": "active",
+        "turns": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    _save_conversation(invoice_id, record)
+    return record
+
+
+def append_conversation_turn(
+    invoice_id: str, role: str, body: str, subject: str | None = None
+) -> dict[str, Any]:
+    """Appends one turn ('agent' or 'client') to an invoice's conversation
+    and persists it. Assumes start_conversation() has already been called
+    for this invoice — callers in execute.py guarantee that."""
+    record = get_conversation(invoice_id)
+    if record is None:
+        # Defensive fallback — should not normally happen, but a thread
+        # must exist to append to rather than silently dropping a reply.
+        record = start_conversation(invoice_id, client_name="Unknown Client", recipient_email=None)
+
+    record.setdefault("turns", []).append({
+        "role": role,
+        "subject": subject,
+        "body": body,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    record["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_conversation(invoice_id, record)
+    return record
+
+
+def set_conversation_status(invoice_id: str, status: str) -> dict[str, Any] | None:
+    """status is one of 'active' | 'resolved' | 'escalated'."""
+    record = get_conversation(invoice_id)
+    if record is None:
+        return None
+    record["status"] = status
+    record["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_conversation(invoice_id, record)
+    return record

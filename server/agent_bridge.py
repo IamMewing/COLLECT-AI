@@ -35,9 +35,12 @@ from agent import (
     mock_run_sweep,
     mock_approve_and_execute,
     mock_payment_confirmed,
+    mock_handle_incoming_reply,
     run_sweep,
     approve_and_execute,
     record_payment_confirmed,
+    handle_incoming_reply,
+    check_for_replies,
     DraftedMessage,
 )
 
@@ -218,6 +221,31 @@ def handle_payment_confirmed(payload: dict) -> dict:
     }
 
 
+def handle_check_replies(payload: dict) -> dict:
+    """Polls the inbox for client replies (agent/inbox.py) and runs each one
+    through the autonomous negotiation loop (agent/execute.py's
+    handle_incoming_reply, or its mock counterpart). Meant to be called on a
+    schedule (see server.js's /api/agent/check-replies, triggered by Cloud
+    Scheduler) rather than once per page load.
+    """
+    replies = check_for_replies()
+    results = []
+    for reply in replies:
+        try:
+            if USE_MOCK:
+                outcome = mock_handle_incoming_reply(reply)
+            else:
+                outcome = handle_incoming_reply(reply)
+        except Exception as exc:  # noqa: BLE001 - one bad reply must not stop the rest of the batch
+            outcome = {"status": "error", "reason": str(exc)}
+        results.append({
+            "invoice_id": reply.get("invoice_id"),
+            "from_email": reply.get("from_email"),
+            **outcome,
+        })
+    return {"checked": len(replies), "results": results}
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -238,8 +266,13 @@ def main():
                 res = handle_approve(payload)
             elif action == "payment_confirmed":
                 res = handle_payment_confirmed(payload)
+            elif action == "check_replies":
+                res = handle_check_replies(payload)
             else:
-                raise ValueError(f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', and 'payment_confirmed'.")
+                raise ValueError(
+                    f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', "
+                    "'payment_confirmed', and 'check_replies'."
+                )
 
         json.dump(res, sys.stdout)
         sys.stdout.flush()

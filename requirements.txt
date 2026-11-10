@@ -1,29 +1,48 @@
-strands-agents>=1.54.0
-strands-agents-tools
-anthropic
-google-genai
-pydantic>=2
+# All packages below are pinned to EXACT versions that are already
+# installed, tested (105 passing tests), and smoke-tested live in this
+# project — not loose ranges. This isn't just tidiness: an unpinned
+# `pip install` resolves against whatever is newest *at build time*, and on
+# 2026-11-06 that silently broke the Cloud Build deploy. `paypal-agent-toolkit`
+# (below) went from a 3-dependency package at 1.1.0 to one that hard-requires
+# `langchain==0.3.23`, `crewai-tools==0.13.2`, and `openai-agents==0.0.2` as of
+# 1.11.0 — none of which this project uses (we only call
+# `paypal_agent_toolkit.shared.api`/`.shared.configuration`, see
+# agent/tools/paypal_tools.py) — and crewai-tools' own sprawling dependency
+# tree (chromadb, fastapi, slack-bolt, pulsar-client, opentelemetry...) sent
+# pip's resolver into an hour-long backtracking search for a mutually
+# compatible set that Cloud Build gave up on (TIMEOUT / context deadline
+# exceeded). Exact pins mean pip installs precisely this, no resolving.
+# Re-verify deliberately (not by just bumping a `>=`) before raising any of
+# these.
+strands-agents==1.63.0
+strands-agents-tools==0.8.12
+anthropic==2.4.0
+google-genai==2.34.0
+pydantic==2.13.5
 # Durable persistence for client memory, invoice state, and the sent-message
 # history log, used when FIRESTORE_ENABLED=true — see agent/memory.py. Local
 # JSON files remain the default so nothing requires GCP credentials locally.
-google-cloud-firestore>=2.19
+google-cloud-firestore==2.34.1
 # PayPal's own agent-toolkit SDK — gives the negotiate agent (agent/agents.py)
 # real, directly-callable PayPal Orders tools instead of Node-side code being
-# the only thing that ever talks to PayPal. Verified against v1.11.0 by
-# installing it and reading the actual tool_handlers/parameters source (same
-# "not from memory" standard as the Strands integration — see README). Only
-# the Orders tools are used (create/capture/get) — the toolkit's invoicing
-# tools (create_invoice, send_invoice, send_invoice_reminder) hit the exact
+# the only thing that ever talks to PayPal. Verified by installing it and
+# reading the actual tool_handlers/parameters source (same "not from memory"
+# standard as the Strands integration — see README). Only the Orders tools
+# are used (create/capture/get) — the toolkit's invoicing tools
+# (create_invoice, send_invoice, send_invoice_reminder) hit the exact
 # `/v2/invoicing/invoices` endpoint that already returned a persistent 403
 # NOT_AUTHORIZED on this project's sandbox account (see PAYPAL_SETUP.md), so
 # they're deliberately not wired up — Orders is the API family already
-# confirmed working here.
-paypal-agent-toolkit>=1.11.0
+# confirmed working here. Pinned to 1.1.0 specifically (not latest) — see
+# the block comment above: 1.1.0 is the last version before this toolkit
+# started hard-requiring langchain/crewai-tools/openai-agents, none of which
+# `agent/tools/paypal_tools.py` ever imports.
+paypal-agent-toolkit==1.1.0
 # Real WhatsApp/SMS sending (agent/tools/sms_tools.py) — verified against
 # v9.13.0 by installing it and inspecting the actual Client/messages.create
 # signatures in site-packages. See that module's docstring for the WhatsApp
 # 24-hour free-form-message session window this surfaced (and how it's
 # handled) — the same "the obvious API call isn't actually usable yet"
 # discovery process already applied to PayPal's Invoicing API above.
-twilio>=9.13.0
+twilio==9.13.0
 

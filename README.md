@@ -86,29 +86,58 @@ pipeline still runs.
 ## WhatsApp & SMS (multichannel outreach)
 
 Email was never going to be the only channel a collections agent needs —
-plenty of overdue clients are more likely to read a text. `agent/tools/sms_tools.py`
-sends real WhatsApp/SMS messages via Twilio, verified against the actually
-**installed `twilio` v9.13.0 package** (`Client(username=, password=)`,
-`client.messages.create(to=, from_=, body=)`) rather than written from
-memory. Whichever channel the plan agent picks, it only ever picks
-`whatsapp`/`sms` when a phone number is actually on file for that invoice —
-the agent is told explicitly which contact methods exist, so it can't draft
-a WhatsApp message to a client it has no number for.
+plenty of overdue clients are more likely to read a text. WhatsApp sends go
+through **Meta's own WhatsApp Cloud API directly** (`agent/tools/whatsapp_tools.py`,
+`graph.facebook.com`), not Twilio — see "Why WhatsApp went direct to Meta,
+not through Twilio" below for why. SMS support (`agent/tools/sms_tools.py`,
+verified against the actually **installed `twilio` v9.13.0 package**) is
+still in the codebase but this project has no Twilio phone number
+configured, so it stays a print-only stub in practice. Whichever channel the
+plan agent picks, it only ever picks `whatsapp` when a phone number is
+actually on file for that invoice — the agent is told explicitly which
+contact methods exist, so it can't draft a WhatsApp message to a client it
+has no number for.
 
-**The constraint that actually shaped this, found by reading Twilio's own
-docs instead of assuming WhatsApp works like email:** WhatsApp's Business
-API only allows a free-form, business-initiated message inside the
-**24-hour session window** opened by the client's own last inbound message.
-Outside that window, a business-initiated send requires a pre-approved
-message template — infrastructure this hackathon sandbox doesn't have. So
-`send_text_message(to_phone, body, opens_session)` encodes that rule at the
-one point it matters: `opens_session=True` (passed only when replying to a
-message the client just sent) allows a real WhatsApp send; everywhere else —
-the agent's first-ever outreach on an invoice, and every scheduled,
-unprompted message like an installment reminder — `opens_session` is
-`False` and the send always downgrades to plain SMS, which has no such
-window. This is the same "catch the real API constraint before demo day"
-instinct as the PayPal Invoicing 403 above, applied one phase earlier.
+**Why WhatsApp went direct to Meta, not through Twilio:** the original plan
+was Twilio for both WhatsApp and SMS. Two real constraints surfaced once it
+came time to actually wire this up for the live demo, not in a sandbox:
+
+1. Twilio's console no longer hands out a phone number usable via the REST
+   API for free — only through its own "Try out" demo flow, which is
+   console-only, canned-templates-only, and doesn't support custom TwiML
+   webhook responses at all. A number usable from our own code requires
+   upgrading to a paid Twilio account.
+2. Separately, sending plain SMS to Indian numbers runs into **TRAI's DLT
+   sender-registration requirement** — a regulatory rule, not a Twilio
+   pricing one, that silently blocks unregistered senders at the carrier
+   level.
+
+Meta's Cloud API sidesteps both: it gives a genuinely free test number
+during development (no card required, up to a handful of phone numbers
+registered as testers), and WhatsApp isn't subject to India's SMS-specific
+DLT rules. `agent/tools/whatsapp_tools.py` was built to Meta's documented
+request/response shape for `POST /<PHONE_NUMBER_ID>/messages`, the same
+"verify against the real contract, not memory" standard as every other
+integration in this project — see that module's docstring for the one
+caveat: this project's own sandbox has no outbound network access to
+graph.facebook.com to test a live call against, so treat it as unverified
+until it's actually been exercised from a deployed environment.
+
+**The constraint that shaped WhatsApp's session handling, found by reading
+Meta/Twilio's own docs instead of assuming WhatsApp works like email:**
+WhatsApp's Business Platform only allows a free-form, business-initiated
+message inside the **24-hour session window** opened by the client's own
+last inbound message. Outside that window, a business-initiated send
+requires a pre-approved message template — infrastructure this project
+doesn't have set up. `send_whatsapp_message()` doesn't try to guess this in
+advance the way the old Twilio-backed version did (branching to SMS outside
+the window) — there's no SMS fallback anymore, so it just asks Meta's API
+directly and reports whatever Meta actually says: a reply to a message the
+client sent first succeeds; the agent's first-ever outreach on a phone-only
+invoice fails cleanly with Meta's own error, reported as `status='failed'`,
+until a template is set up. This is the same "catch the real API constraint
+before demo day" instinct as the PayPal Invoicing 403 above, applied one
+phase earlier.
 
 An inbound text is matched back to its invoice the same two-tier way an
 inbound email is matched by its `[INV-XXXX]` subject tag: first by an
@@ -122,17 +151,21 @@ doesn't know or care which channel a message arrived on, only
 `agent/memory.py`'s conversation record does (tracking `recipient_phone` and
 a per-turn `channel`).
 
-`POST /api/twilio/webhook` receives inbound WhatsApp/SMS the same way
-`POST /api/paypal/webhook` receives payment events: Twilio signs every
-request, the server verifies that signature (`twilio.validateRequest`)
-before trusting anything in the body, and rejects with `401` otherwise —
-`TWILIO_WEBHOOK_ALLOW_UNVERIFIED=true` is an explicit, documented escape
-hatch for local testing only, never for a real deployment. See
-`server/.env.example` for the Twilio credentials and sender numbers this
-needs (`TWILIO_WHATSAPP_FROM` for replies, `TWILIO_SMS_FROM` for everything
-else) — like PayPal and real email, this degrades gracefully when
-unconfigured: `GET /api/twilio/status` reports the current state, and
-outreach just stays on whichever channels **are** configured.
+`POST /api/whatsapp/webhook` receives inbound WhatsApp the way
+`POST /api/paypal/webhook` receives payment events: Meta signs every
+request with `X-Hub-Signature-256` (an HMAC-SHA256 over the raw body, keyed
+with the app secret), the server verifies that signature before trusting
+anything in the body, and rejects with `401` otherwise —
+`META_WHATSAPP_WEBHOOK_ALLOW_UNVERIFIED=true` is an explicit, documented
+escape hatch for local testing only, never for a real deployment. A separate
+`GET /api/whatsapp/webhook` handles Meta's one-time verification handshake
+(echoing back `hub.challenge` only if `hub.verify_token` matches). See
+`server/.env.example` for the Meta app credentials this needs
+(`META_WHATSAPP_ACCESS_TOKEN`, `META_WHATSAPP_PHONE_NUMBER_ID`,
+`META_WHATSAPP_VERIFY_TOKEN`, `META_WHATSAPP_APP_SECRET`) — like PayPal and
+real email, this degrades gracefully when unconfigured: `GET
+/api/whatsapp/status` reports the current state, and outreach just stays on
+whichever channels **are** configured (email, always).
 
 ## AI voice calls
 
@@ -195,6 +228,16 @@ reuse the same `TWILIO_SMS_FROM` number as the caller ID — one Twilio
 number handles SMS and Voice by default, so there's no separate number to
 provision.
 
+**Current status: stubbed, not live.** Unlike WhatsApp (moved to Meta's
+Cloud API above), there's no free equivalent for placing real phone calls —
+every telephony provider charges for connecting to the real phone network,
+Twilio included, so this stays `status='stubbed'` on the deployed demo
+rather than spending real money on a feature with no free-tier path. The
+whole flow above is real, implemented, and covered by 12 passing tests and
+a full curl-simulated smoke test of every branch (opening turn, speech,
+silence/re-prompt, turn cap, hangup) — it's genuinely ready the moment a
+Twilio number is added to the environment, just not wired to one right now.
+
 ## What's here
 
 ```
@@ -204,7 +247,8 @@ agent/
 │   ├── risk.py           calculate_risk_score — ported from riskEngine.js
 │   ├── probability.py    predict_payment_probability — ported from probabilityEngine.js
 │   ├── paypal_tools.py   create_paypal_order / get_paypal_order_status — PayPal's own Agent Toolkit
-│   └── sms_tools.py      send_text_message — real WhatsApp/SMS via Twilio
+│   ├── whatsapp_tools.py send_whatsapp_message — real WhatsApp via Meta's Cloud API directly
+│   └── sms_tools.py      send_text_message — SMS via Twilio (no number configured; stubbed)
 ├── agents.py         Per-node Agent definitions (model, tools, prompts)
 ├── graph.py          The actual strands.multiagent.Graph wiring
 ├── execute.py        Phase 2: approve → send → reflect (post-graph)
@@ -327,17 +371,27 @@ without a rewrite.
 
 ## What's intentionally not here yet
 
+- **No Twilio number configured, so SMS and voice calls stay stubbed on
+  the live demo** — a real Twilio number usable via the REST API now
+  requires upgrading to a paid account (Twilio's free tier only offers a
+  console-only "Try out" demo that doesn't support custom webhooks), and
+  plain SMS to Indian numbers separately runs into TRAI's DLT
+  sender-registration requirement regardless of provider. Both the SMS
+  path (`agent/tools/sms_tools.py`) and the voice call flow ("AI voice
+  calls" above) are fully built and tested, just not wired to live
+  credentials — see that section for voice specifically.
+- **Business-initiated WhatsApp templates** — Meta requires a
+  pre-approved message template for any WhatsApp send that doesn't fall
+  inside the client's 24-hour reply window (see "WhatsApp & SMS" above).
+  Getting one approved needs time this project didn't spend, so first-touch
+  outreach to a phone-only client currently fails with Meta's own error
+  rather than silently succeeding — reported honestly (`status='failed'`),
+  not glossed over. Replying to a client who's already messaged in, which
+  is the actual demo path, works today with zero template needed.
 - **Inbound voice calls** — only outbound is wired up (a human clicks "Call
   them"); a client calling the demo number back would need its own TwiML
   entry point. Reasonable for a collections agent that initiates contact,
   but worth naming as a gap rather than an oversight.
-- **Business-initiated WhatsApp templates** — Meta requires a
-  pre-approved message template for any WhatsApp send that doesn't fall
-  inside the client's 24-hour reply window (see "WhatsApp & SMS" above).
-  Getting one approved needs a verified WhatsApp Business/Meta account
-  this hackathon sandbox doesn't have, so first-touch outreach and
-  scheduled reminders always ride plain SMS instead — correct behavior
-  for this setup, not a shortcut taken by accident.
 - **AgentCore Runtime / Bedrock deployment** — the model-provider switch
   in `agents.py` (see "Switching to Bedrock" above) means no code change
   is needed to move off the Anthropic/Gemini API, but this hasn't

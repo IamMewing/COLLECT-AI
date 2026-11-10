@@ -29,6 +29,7 @@ from .memory import (
 )
 from .tools.paypal_tools import create_paypal_order, save_installment_order_mapping
 from .tools.sms_tools import send_text_message
+from .tools.whatsapp_tools import send_whatsapp_message
 from .inbox import INVOICE_TAG_RE
 
 
@@ -87,13 +88,20 @@ def send_message(
     tag (see _tag_subject) — this is what lets agent/inbox.py's reply poller
     match an incoming reply back to this invoice's conversation thread.
 
-    WhatsApp/SMS (channel in ("whatsapp", "sms")): sent via
-    agent/tools/sms_tools.py if TWILIO_ACCOUNT_SID/AUTH_TOKEN are configured
-    and `recipient_phone` is given; otherwise falls back to the print stub.
-    `opens_session` should be True only when this message is a reply to one
-    the client just sent on WhatsApp/SMS (that inbound message is what opens
-    WhatsApp's 24h free-form window) — see sms_tools.send_text_message's
-    docstring for why this matters and what happens when it's False.
+    WhatsApp (channel == "whatsapp"): sent via Meta's own Cloud API
+    (agent/tools/whatsapp_tools.py) if META_WHATSAPP_ACCESS_TOKEN/
+    META_WHATSAPP_PHONE_NUMBER_ID are configured and `recipient_phone` is
+    given; otherwise falls back to the print stub. `opens_session` is
+    accepted here for backward compatibility with the SMS path below but
+    whatsapp_tools.send_whatsapp_message() doesn't branch on it — see that
+    module's docstring for why (Meta's API itself is the source of truth on
+    whether the 24h free-form window is open, not a guess made here).
+
+    SMS (channel == "sms"): sent via agent/tools/sms_tools.py if
+    TWILIO_ACCOUNT_SID/AUTH_TOKEN/TWILIO_SMS_FROM are configured; otherwise
+    falls back to the print stub. (This project currently has no Twilio
+    number configured — see README — so this path is stubbed in practice;
+    it's left in place rather than removed in case that changes later.)
     """
     real_send_requested = os.environ.get("SEND_REAL_EMAIL", "false").lower() == "true"
 
@@ -131,7 +139,8 @@ def send_message(
 
     if message.channel in ("whatsapp", "sms"):
         if recipient_phone:
-            result = send_text_message(
+            sender = send_whatsapp_message if message.channel == "whatsapp" else send_text_message
+            result = sender(
                 recipient_phone, _tag_body(message.body, invoice_id), opens_session=opens_session
             )
             return {

@@ -82,7 +82,11 @@ def mock_run_sweep(invoice: dict) -> dict:
     # pick whatsapp/sms without a phone actually on file.
     has_email = bool(invoice.get("email"))
     has_phone = bool(invoice.get("phone"))
-    standard_channel = "email" if has_email else ("sms" if has_phone else "email")
+    # Both branches fall back to whatsapp now, not sms — this project has no
+    # Twilio SMS number configured (WhatsApp moved to Meta's own Cloud API
+    # instead, see agent/tools/whatsapp_tools.py), so "sms" is dead in
+    # practice; kept as a valid channel value in case that changes later.
+    standard_channel = "email" if has_email else ("whatsapp" if has_phone else "email")
     escalation_channel = "whatsapp" if has_phone else "email"
 
     if probability.probability >= 85:

@@ -60,7 +60,7 @@ def test_standard_branch_prefers_email_when_both_are_on_file():
     assert result["draft"].channel == "email"
 
 
-def test_standard_branch_falls_back_to_sms_with_only_a_phone_on_file():
+def test_standard_branch_falls_back_to_whatsapp_with_only_a_phone_on_file():
     invoice = {
         "invoice_id": "INV-CH-2", "client_name": "Acme", "amount": 1000,
         "days_overdue": 10, "ignored_reminders": 1, "relationship_score": 70,
@@ -68,10 +68,8 @@ def test_standard_branch_falls_back_to_sms_with_only_a_phone_on_file():
     }
     result = mock_run_sweep(invoice)
     assert result["plan"].branch == "standard"
-    assert result["plan"].channel == "sms"
-    assert result["draft"].channel == "sms"
-    # SMS drafts should be terse — no multi-paragraph email-style body.
-    assert len(result["draft"].body) < 300
+    assert result["plan"].channel == "whatsapp"
+    assert result["draft"].channel == "whatsapp"
 
 
 def test_escalation_branch_prefers_whatsapp_when_a_phone_is_on_file():
@@ -155,12 +153,14 @@ def test_whatsapp_reply_gets_a_whatsapp_response_sent_with_an_open_session(monke
 
     sent = {}
 
-    def fake_send_text_message(to_phone, body, opens_session=False):
+    def fake_send_whatsapp_message(to_phone, body, opens_session=False):
         sent["to_phone"] = to_phone
         sent["opens_session"] = opens_session
-        return {"status": "sent", "channel_used": "whatsapp", "real_send": True, "recipient": to_phone, "message_sid": "SM1"}
+        return {"status": "sent", "channel_used": "whatsapp", "real_send": True, "recipient": to_phone, "message_sid": "wamid.1"}
 
-    monkeypatch.setattr(execute_module, "send_text_message", fake_send_text_message)
+    # WhatsApp sends go through Meta's Cloud API now (agent/tools/whatsapp_tools.py),
+    # not Twilio's send_text_message — see execute.py's send_message().
+    monkeypatch.setattr(execute_module, "send_whatsapp_message", fake_send_whatsapp_message)
     monkeypatch.setenv("AUTO_APPROVE_NEGOTIATION", "true")
 
     result = execute_module.handle_incoming_reply({

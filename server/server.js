@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
@@ -811,6 +812,135 @@ app.post('/api/twilio/webhook', async (req, res) => {
     // re-run the negotiation loop on a reply that may have partially
     // succeeded already.
     respondEmptyTwiml();
+  }
+});
+
+/**
+ * GET /api/whatsapp/status
+ * Mirrors GET /api/twilio/status — WhatsApp now goes through Meta's own
+ * Cloud API directly (agent/tools/whatsapp_tools.py) instead of Twilio, so
+ * it gets its own status/config surface rather than sharing Twilio's. See
+ * that module's docstring for why: a genuinely free, REST-API-usable Twilio
+ * number requires upgrading to a paid account, and this project's WhatsApp
+ * channel needed a path that doesn't.
+ */
+app.get('/api/whatsapp/status', auth.requireAuth, (req, res) => {
+  res.json({
+    configured: Boolean(process.env.META_WHATSAPP_ACCESS_TOKEN && process.env.META_WHATSAPP_PHONE_NUMBER_ID),
+    webhook_configured: Boolean(process.env.META_WHATSAPP_VERIFY_TOKEN),
+    webhook_unverified_allowed: (process.env.META_WHATSAPP_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true',
+  });
+});
+
+/**
+ * GET /api/whatsapp/webhook
+ * Meta's one-time "webhook verification handshake": when you register this
+ * URL in the Meta App dashboard, Meta calls it with a challenge token that
+ * must be echoed back verbatim, but ONLY if hub.verify_token matches the
+ * arbitrary secret you chose (META_WHATSAPP_VERIFY_TOKEN) — this is how
+ * Meta confirms you actually control this URL before sending it real
+ * message events. See https://developers.facebook.com/docs/graph-api/webhooks/getting-started
+ */
+app.get('/api/whatsapp/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const expected = process.env.META_WHATSAPP_VERIFY_TOKEN;
+
+  if (mode === 'subscribe' && expected && token === expected) {
+    console.log('✅ [WhatsApp webhook] Verification handshake succeeded.');
+    return res.status(200).type('text/plain').send(challenge);
+  }
+  console.warn('⛔ [WhatsApp webhook] Verification handshake rejected — token mismatch or META_WHATSAPP_VERIFY_TOKEN unset.');
+  return res.sendStatus(403);
+});
+
+/**
+ * Verifies Meta's X-Hub-Signature-256 header — an HMAC-SHA256 of the exact
+ * raw request body, keyed with the Meta app's App Secret (NOT the access
+ * token). Same reasoning as verifyTwilioWebhook above: anyone who finds this
+ * URL could otherwise inject a fake inbound WhatsApp message into a real
+ * negotiation thread, so an unverified request is REFUSED by default.
+ * META_WHATSAPP_WEBHOOK_ALLOW_UNVERIFIED=true is the one escape hatch, for
+ * local testing without a publicly reachable URL for Meta to sign against.
+ */
+function verifyMetaWebhook(req) {
+  const appSecret = process.env.META_WHATSAPP_APP_SECRET;
+  const signatureHeader = req.headers['x-hub-signature-256'] || '';
+  const allowUnverified = (process.env.META_WHATSAPP_WEBHOOK_ALLOW_UNVERIFIED || '').toLowerCase() === 'true';
+  const reason = appSecret
+    ? 'signature verification failed'
+    : 'META_WHATSAPP_APP_SECRET is not set, so there is nothing to verify the signature against';
+
+  if (!appSecret || !req.rawBody) {
+    return { verified: false, allowUnverified, reason };
+  }
+
+  const expectedSig = 'sha256=' + crypto.createHmac('sha256', appSecret).update(req.rawBody).digest('hex');
+  // timingSafeEqual needs equal-length buffers, or it throws — a mismatched
+  // length just means "not verified", not a crash.
+  const a = Buffer.from(signatureHeader);
+  const b = Buffer.from(expectedSig);
+  const verified = a.length === b.length && crypto.timingSafeEqual(a, b);
+  return { verified, allowUnverified, reason };
+}
+
+/**
+ * POST /api/whatsapp/webhook
+ * Meta calls this the moment a client sends a WhatsApp message to our
+ * number — the direct-Meta counterpart to POST /api/twilio/webhook. Every
+ * inbound message runs through the exact same negotiation loop
+ * (handleIncomingText -> agent/execute.py's handle_incoming_reply) that
+ * Twilio-routed replies and email replies do; only how the message got here
+ * differs. See https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks
+ * for the payload shape parsed below.
+ */
+app.post('/api/whatsapp/webhook', async (req, res) => {
+  try {
+    const { verified, allowUnverified, reason } = verifyMetaWebhook(req);
+
+    if (!verified) {
+      if (!allowUnverified) {
+        console.warn(`⛔ [WhatsApp webhook] Rejected (401) — ${reason}.`);
+        return res.status(401).json({ error: 'Webhook signature not verified', details: reason });
+      }
+      console.warn(
+        `⚠️  [WhatsApp webhook] UNVERIFIED message processed anyway — ${reason}. ` +
+        `META_WHATSAPP_WEBHOOK_ALLOW_UNVERIFIED is set; this must be unset wherever this server is internet-reachable.`
+      );
+    }
+
+    // Meta always wants a fast 200 regardless of what's inside, same
+    // "ack immediately, process async-in-spirit" contract as Twilio's.
+    const entry = req.body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const message = change?.value?.messages?.[0];
+
+    if (!message || message.type !== 'text') {
+      // Status callbacks (delivered/read receipts) and non-text message
+      // types land here too — nothing for the negotiation loop to do with
+      // those, so just acknowledge and move on.
+      return res.sendStatus(200);
+    }
+
+    const fromPhone = `+${message.from}`;
+    const body = message.text?.body || '';
+    console.log(`\n💬 [WhatsApp webhook] Inbound whatsapp from ${fromPhone}${verified ? ' [verified]' : ' [unverified]'}`);
+
+    if (!body) {
+      return res.sendStatus(200);
+    }
+
+    const result = await handleIncomingText(fromPhone, body, 'whatsapp');
+    console.log(`🔁 [WhatsApp webhook] Negotiation loop result for ${fromPhone}:`, result.status || result.reason || result);
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('❌ [WhatsApp webhook] Failed:', error);
+    // Still 200 — an HTTP error here just makes Meta retry the same
+    // message later, which would re-run the negotiation loop on a reply
+    // that may have partially succeeded already.
+    res.sendStatus(200);
   }
 });
 

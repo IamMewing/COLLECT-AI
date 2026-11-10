@@ -38,11 +38,15 @@ google-cloud-firestore==2.34.1
 # started hard-requiring langchain/crewai-tools/openai-agents, none of which
 # `agent/tools/paypal_tools.py` ever imports.
 paypal-agent-toolkit==1.1.0
-# Real WhatsApp/SMS sending (agent/tools/sms_tools.py) — verified against
-# v9.13.0 by installing it and inspecting the actual Client/messages.create
-# signatures in site-packages. See that module's docstring for the WhatsApp
-# 24-hour free-form-message session window this surfaced (and how it's
-# handled) — the same "the obvious API call isn't actually usable yet"
-# discovery process already applied to PayPal's Invoicing API above.
+# SMS sending only now (agent/tools/sms_tools.py) — verified against v9.13.0
+# by installing it and inspecting the actual Client/messages.create
+# signatures in site-packages. This project currently has no Twilio number
+# configured (see README), so this path is stubbed in practice; kept in
+# case that changes. WhatsApp moved off Twilio entirely — see
+# agent/tools/whatsapp_tools.py and the `requests` pin below.
 twilio==9.13.0
+# Direct calls to Meta's WhatsApp Cloud API (agent/tools/whatsapp_tools.py)
+# — already a transitive dependency of several packages above, pinned
+# explicitly now that this project's own code imports it directly too.
+requests==2.34.2
 

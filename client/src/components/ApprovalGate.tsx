@@ -89,7 +89,7 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
   // rejected send look identical to a real one.
   const deliveryNote = decided && sr
     ? sr.real_send === false && sent
-      ? `Simulated only — ${sr.channel_used || sr.channel} isn't configured (or had no recipient), so nothing was actually delivered.`
+      ? `Simulated only — nothing was actually delivered${sr.error ? ` (${sr.error})` : ` (${sr.channel_used || sr.channel} isn't configured, or had no recipient)`}.`
       : !sent && sr.error
         ? `${(sr.channel_used || sr.channel || 'the provider').toString().toUpperCase()} rejected this: ${sr.error}`
         : null

@@ -104,6 +104,7 @@ def send_message(
     it's left in place rather than removed in case that changes later.)
     """
     real_send_requested = os.environ.get("SEND_REAL_EMAIL", "false").lower() == "true"
+    stub_reason: str | None = None
 
     if real_send_requested and message.channel == "email":
         smtp_user = os.environ.get("SMTP_USER")
@@ -111,12 +112,11 @@ def send_message(
         recipient = recipient_email or os.environ.get("DEMO_RECIPIENT_EMAIL")
 
         if not (smtp_user and smtp_pass and recipient):
-            print(
-                "[SEND via email] SEND_REAL_EMAIL=true but SMTP_USER / SMTP_PASS / "
-                "a recipient (invoice email or DEMO_RECIPIENT_EMAIL) are not all set — "
-                "falling back to stub.",
-                flush=True,
+            stub_reason = (
+                "SEND_REAL_EMAIL=true but SMTP_USER / SMTP_PASS / a recipient "
+                "(invoice email or DEMO_RECIPIENT_EMAIL) are not all set."
             )
+            print(f"[SEND via email] {stub_reason} Falling back to stub.", flush=True)
         else:
             try:
                 host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
@@ -135,6 +135,7 @@ def send_message(
                 print(f"[SEND via email] Real email sent to {recipient}. Subject: {message.subject}", flush=True)
                 return {"status": "sent", "channel": message.channel, "real_send": True, "recipient": recipient}
             except Exception as exc:  # noqa: BLE001 - deliberately broad: never let a send failure break approval
+                stub_reason = str(exc)
                 print(f"[SEND via email] Real send FAILED ({exc}) — falling back to stub.", flush=True)
 
     if message.channel in ("whatsapp", "sms"):
@@ -143,6 +144,8 @@ def send_message(
             result = sender(
                 recipient_phone, _tag_body(message.body, invoice_id), opens_session=opens_session
             )
+            if result["status"] == "failed":
+                print(f"[SEND via {message.channel}] Real send FAILED: {result.get('error')}", flush=True)
             return {
                 "status": result["status"],
                 "channel": message.channel,
@@ -150,13 +153,20 @@ def send_message(
                 "real_send": result["real_send"],
                 "recipient": result["recipient"],
                 "message_sid": result.get("message_sid"),
+                "error": result.get("error"),
             }
         print(f"[SEND via {message.channel}] No phone on file for this invoice — falling back to stub.", flush=True)
 
     # Stub path (default, or fallback on missing config / send failure / no phone on file)
     print(f"[SEND via {message.channel}] Subject: {message.subject}")
     print(message.body)
-    return {"status": "sent", "channel": message.channel, "real_send": False, "recipient": recipient_email or recipient_phone}
+    return {
+        "status": "sent",
+        "channel": message.channel,
+        "real_send": False,
+        "recipient": recipient_email or recipient_phone,
+        "error": stub_reason,
+    }
 
 
 def approve_and_execute(

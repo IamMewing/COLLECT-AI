@@ -40,7 +40,7 @@ def get_model():
         from strands.models.gemini import GeminiModel
         return GeminiModel(
             client_args={"api_key": os.environ["GEMINI_API_KEY"].strip()},
-            model_id=os.environ.get("COLLECTAI_MODEL_ID", "gemini-3.1-flash-lite").strip(),
+            model_id=os.environ.get("COLLECTAI_MODEL_ID", "gemini-3.5-flash-lite").strip(),
         )
     elif provider == "anthropic":
         return AnthropicModel(

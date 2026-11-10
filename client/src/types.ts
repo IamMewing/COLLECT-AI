@@ -77,6 +77,10 @@ export interface ApproveResult {
   send_result?: {
     status: string;
     channel: string;
+    channel_used?: string;
+    real_send?: boolean;
+    recipient?: string;
+    error?: string;
   };
   /** Real PayPal sandbox payment link, when PayPal is configured and the
    * invoice creation call succeeded. Null otherwise (graceful fallback). */

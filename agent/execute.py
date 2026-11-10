@@ -270,7 +270,13 @@ def approve_and_execute(
         "real_send": send_result.get("real_send", False),
     })
 
-    return {"status": "sent", "send_result": send_result, "reflection": reflection}
+    # IMPORTANT: this must reflect what send_message() actually reported, not
+    # a hardcoded "sent" — otherwise a real SMTP failure or a Meta WhatsApp
+    # rejection (e.g. no approved template / 24h session window closed on the
+    # very first message to a contact) gets silently reported to the
+    # Approval Gate UI as a success even though nothing actually left the
+    # server. The UI's "Sent" vs "Not sent" badge reads this top-level field.
+    return {"status": send_result.get("status", "sent"), "send_result": send_result, "reflection": reflection}
 
 
 def record_payment_confirmed(

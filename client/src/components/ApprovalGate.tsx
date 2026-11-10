@@ -81,6 +81,19 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
   const decided = approveResult !== null;
   const sent = approveResult?.status === 'sent' || approveResult?.status === 'sent (mock)';
   const risky = risk.category === 'Critical' || risk.category === 'High';
+  const sr = approveResult?.send_result;
+  // "sent" can mean a real send, a mock run, or a stub fallback (no creds
+  // configured) — all three report status: 'sent' so the badge above stays
+  // green, but real_send distinguishes whether anything actually left the
+  // server. Surface that distinction here instead of letting a stubbed or
+  // rejected send look identical to a real one.
+  const deliveryNote = decided && sr
+    ? sr.real_send === false && sent
+      ? `Simulated only — ${sr.channel_used || sr.channel} isn't configured (or had no recipient), so nothing was actually delivered.`
+      : !sent && sr.error
+        ? `${(sr.channel_used || sr.channel || 'the provider').toString().toUpperCase()} rejected this: ${sr.error}`
+        : null
+    : null;
 
   const approve = () => {
     const edited = editing && body !== draft.body;
@@ -117,6 +130,12 @@ export const ApprovalGate: React.FC<ApprovalGateProps> = ({
           </button>
         )}
       </div>
+
+      {deliveryNote && (
+        <p className="body body--sm" style={{ marginTop: -14, marginBottom: 22, color: 'var(--warn)' }}>
+          {deliveryNote}
+        </p>
+      )}
 
       {/* who / what / odds */}
       <dl className="readouts" style={{ marginBottom: 'clamp(22px, 3vw, 34px)' }}>

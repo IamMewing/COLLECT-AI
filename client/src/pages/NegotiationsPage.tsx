@@ -9,7 +9,8 @@ export const NegotiationsPage: React.FC = () => {
   return (
     <PageField
       id="negotiations"
-      tone="lime"
+      tone="ultra"
+      tight
       marker="Still working it"
       statement="It doesn’t stop at one reminder — it reads the reply and keeps going"
     >

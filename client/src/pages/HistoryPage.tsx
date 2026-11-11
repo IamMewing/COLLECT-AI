@@ -10,6 +10,7 @@ export const HistoryPage: React.FC = () => {
     <PageField
       id="history"
       tone="ultra"
+      tight
       marker="The record"
       statement="Every message it sent, and who got it"
     >

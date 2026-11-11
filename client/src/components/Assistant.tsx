@@ -46,6 +46,26 @@ export const Assistant: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
+  /* Tuck the button away while the page is moving. Fixed to the bottom-right,
+     it would otherwise pass straight over whatever is there — on the ledger
+     that is "Run the agent", and a floating button sitting on top of the
+     primary action is worse than no floating button. Scrolling is also
+     exactly when nobody is reaching for it, so it costs nothing to hide, and
+     it comes back as soon as the page settles. Never while the panel is
+     open: that would yank the thing you are typing into off-screen. */
+  const [tucked, setTucked] = useState(false);
+  useEffect(() => {
+    if (open) { setTucked(false); return; }
+    let t = 0;
+    const onScroll = () => {
+      setTucked(true);
+      clearTimeout(t);
+      t = window.setTimeout(() => setTucked(false), 420);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('scroll', onScroll); clearTimeout(t); };
+  }, [open]);
+
   const ask = async (text: string) => {
     const q = text.trim();
     if (!q || thinking) return;
@@ -78,7 +98,7 @@ export const Assistant: React.FC = () => {
   if (!open) {
     return (
       <button
-        className="assistant-fab"
+        className={`assistant-fab${tucked ? ' is-tucked' : ''}`}
         onClick={() => setOpen(true)}
         aria-label="Ask about your accounts"
       >

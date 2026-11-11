@@ -1073,14 +1073,19 @@ main > :last-child { flex: 1 0 auto; }
 
 /* Shared header for every routed page and landing section: marker above a
    statement, with optional status/action on the right. */
+/* Aligned to the TOP, not the bottom. Bottom-aligning sat the status chip
+   level with the last line of a two-line statement, which left it floating
+   in the middle of the field with nothing near it; against the marker it
+   reads as part of the header. */
 .page-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: clamp(18px, 3vw, 40px);
   flex-wrap: wrap;
   margin-bottom: clamp(32px, 5vw, 64px);
 }
+.page-head > :last-child { padding-top: 4px; }
 .page-head .marker { margin-bottom: 18px; display: inline-flex; }
 
 /* First-run / nothing-here states. Deliberately generous: an empty ledger
@@ -1229,6 +1234,16 @@ main > :last-child { flex: 1 0 auto; }
 }
 .assistant-fab:hover { transform: translateY(-2px) scale(1.04); background: var(--lime); color: var(--ink); }
 .assistant-fab:active { transform: scale(0.96); }
+/* Out of the way while the page is moving — see the note in Assistant.tsx.
+   Translated rather than hidden so it comes back by sliding, not blinking. */
+.assistant-fab.is-tucked {
+  transform: translateY(96px);
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant-fab, .assistant-fab.is-tucked { transition: opacity 0.2s linear; transform: none; }
+}
 
 .assistant {
   position: fixed;

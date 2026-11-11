@@ -44,6 +44,7 @@ export const NotificationsPage: React.FC = () => {
     <PageField
       id="notifications"
       tone="ink"
+      tight
       marker="What happened"
       statement="Every event, the moment it lands"
     >

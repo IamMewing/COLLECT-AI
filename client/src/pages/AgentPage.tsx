@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { PageField } from '../components/PageField';
-import { Torn } from '../components/Torn';
 import { PipelineFlow } from '../components/PipelineFlow';
 import { ApprovalGate } from '../components/ApprovalGate';
 import { useAppState } from '../AppState';
@@ -17,10 +16,10 @@ export const AgentPage: React.FC = () => {
   } = useAppState();
 
   return (
-    <>
-      <PageField
+    <PageField
         id="agent"
         tone="ink"
+        tight
         marker="How it thinks"
         statement="It weighs the money and the odds before it writes a word"
         aside={
@@ -66,25 +65,39 @@ export const AgentPage: React.FC = () => {
             onRetry={selectedInvoice ? () => handleRunSweep(selectedInvoice) : undefined}
           />
         )}
-      </PageField>
 
-      <Torn from="ink" to="lime" variant={2} />
-      <PageField
-        id="decision"
-        tone="lime"
-        marker="Your call"
-        statement="Nothing goes out until you say so"
-      >
-        <ApprovalGate
-          sweepResult={sweepResult}
-          approveResult={approveResult}
-          isApproving={isApproving}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onReset={handleReset}
-        />
-      </PageField>
-    </>
+        {/* The gate lives INSIDE the same ink field as the pipeline rather
+            than in one of its own.
+
+            Two things pushed it here. It used to sit on lime, which is the
+            worst surface in the palette for the one screen where you are
+            actually proofreading prose that is about to reach a client — so
+            it moved to ink. But that left two ink fields stacked, which
+            stopped being two fields visually (nothing marks the seam) while
+            still paying for two sets of vertical padding: about 160px of
+            empty black between the reasoning and the decision. They're one
+            continuous act anyway — watch it think, then say yes — so they're
+            one field now, parted by a rule. */}
+        <hr className="rule rule--hair" style={{ margin: 'clamp(40px, 5.5vw, 72px) 0 clamp(26px, 3.5vw, 42px)' }} />
+
+        <header className="page-head" style={{ marginBottom: 'clamp(24px, 3.5vw, 44px)' }}>
+          <div>
+            <span className="marker">Your call</span>
+            <h2 className="statement"><span>Nothing goes out until you say so</span></h2>
+          </div>
+        </header>
+
+        <div id="decision">
+          <ApprovalGate
+            sweepResult={sweepResult}
+            approveResult={approveResult}
+            isApproving={isApproving}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onReset={handleReset}
+          />
+        </div>
+    </PageField>
   );
 };
 

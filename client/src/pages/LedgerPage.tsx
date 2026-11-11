@@ -21,6 +21,7 @@ export const LedgerPage: React.FC = () => {
     <PageField
       id="ledger"
       tone="ultra"
+      tight
       marker="The ledger"
       statement={empty ? 'Nothing on the books yet' : 'Every account it’s watching'}
       aside={
@@ -53,11 +54,9 @@ export const LedgerPage: React.FC = () => {
             selectedInvoiceId={selectedInvoice?.invoice_id}
             onSelectInvoice={selectInvoice}
           />
-          <div id="selector" style={{ marginTop: 'clamp(40px, 6vw, 78px)' }}>
+          <div id="selector" style={{ marginTop: 'clamp(26px, 3.5vw, 46px)' }}>
             <InvoiceSelector
-              invoices={invoices}
               selectedInvoice={selectedInvoice}
-              onSelectInvoice={selectInvoice}
               onRunSweep={handleRunSweep}
               isSweeping={isSweeping}
               onAddInvoice={() => setShowAddInvoice(true)}

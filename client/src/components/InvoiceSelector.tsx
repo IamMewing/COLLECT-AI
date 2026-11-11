@@ -3,10 +3,20 @@ import type { Invoice } from '../types';
 import { Check, Phone, Plus, Zap } from 'lucide-react';
 import { ImportCsvButton } from './ImportCsvButton';
 
+/**
+ * The actions for whichever account is selected in the grid above.
+ *
+ * This used to also carry a row of pills listing every invoice, and a
+ * readout strip of the selected one's figures. Both were deleted: the pills
+ * restated the grid's rows, and every one of the five readouts (amount, days
+ * late, reminders ignored, standing, on-time rate) was already a column in
+ * that same grid, two hundred pixels higher. Three representations of two
+ * records reads as generous at two accounts and as padding at forty — so
+ * selection lives in the grid alone, and this is just what you can DO with
+ * what's selected.
+ */
 interface InvoiceSelectorProps {
-  invoices: Invoice[];
   selectedInvoice: Invoice | null;
-  onSelectInvoice: (inv: Invoice) => void;
   onRunSweep: (inv: Invoice) => void;
   isSweeping: boolean;
   onAddInvoice?: () => void;
@@ -21,11 +31,9 @@ interface InvoiceSelectorProps {
   onInvoicesImported?: () => void;
 }
 
-const inr = (n: number) => '₹' + n.toLocaleString('en-IN');
-const short = (n: number) => (n >= 1000 ? '₹' + Math.round(n / 1000) + 'k' : '₹' + n);
 
 export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
-  invoices, selectedInvoice, onSelectInvoice, onRunSweep,
+  selectedInvoice, onRunSweep,
   isSweeping, onAddInvoice, onMarkPaid, isMarkingPaid, onCallThem, isCalling, onInvoicesImported,
 }) => {
   if (!selectedInvoice) return null;
@@ -42,7 +50,7 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
           gap: 14, flexWrap: 'wrap', marginBottom: 16,
         }}
       >
-        <span className="marker">Pick an account</span>
+        <span className="marker">Selected account</span>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {onInvoicesImported && <ImportCsvButton onImported={onInvoicesImported} />}
           {onAddInvoice && (
@@ -51,23 +59,6 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
             </button>
           )}
         </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 'clamp(28px, 4vw, 48px)' }}>
-        {invoices.map((i) => {
-          const on = i.invoice_id === inv.invoice_id;
-          return (
-            <button
-              key={i.invoice_id}
-              className={`pill pill--sm${on ? ' pill--solid' : ''}`}
-              onClick={() => onSelectInvoice(i)}
-              style={i.status === 'paid' && !on ? { opacity: 0.45 } : undefined}
-            >
-              {i.status === 'paid' && <Check size={12} />}
-              {i.client_name} <span style={{ opacity: 0.6 }}>{short(i.amount)}</span>
-            </button>
-          );
-        })}
       </div>
 
       {/* the selected account */}
@@ -128,32 +119,6 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
         </div>
       </div>
 
-      <dl className="readouts">
-        <div className="readout">
-          <dt>Amount due</dt>
-          <dd>{inr(inv.amount)}</dd>
-        </div>
-        <div className="readout">
-          <dt>Days late</dt>
-          <dd style={late ? { color: 'var(--warn)' } : undefined}>
-            {inv.days_overdue}<small>d</small>
-          </dd>
-        </div>
-        <div className="readout">
-          <dt>Reminders ignored</dt>
-          <dd style={inv.ignored_reminders >= 2 ? { color: 'var(--warn)' } : undefined}>
-            {inv.ignored_reminders}
-          </dd>
-        </div>
-        <div className="readout">
-          <dt>Client standing</dt>
-          <dd>{inv.relationship_score}<small>/100</small></dd>
-        </div>
-        <div className="readout">
-          <dt>Pays on time</dt>
-          <dd>{Math.round(inv.historical_on_time_rate * 100)}<small>%</small></dd>
-        </div>
-      </dl>
     </div>
   );
 };

@@ -107,7 +107,11 @@ def send_whatsapp_message(to_phone: str, body: str, opens_session: bool = False)
 
         if resp.status_code >= 400 or "error" in data:
             err = data.get("error", {})
-            error_msg = f"{err.get('code', resp.status_code)}: {err.get('message', resp.text[:200])}"
+            code_part = str(err.get("code", resp.status_code))
+            if err.get("error_subcode"):
+                code_part += f"/{err['error_subcode']}"
+            detail = err.get("error_user_msg") or err.get("message") or resp.text[:200]
+            error_msg = f"{code_part}: {detail}"
             print(f"[SEND via whatsapp] Real send FAILED ({error_msg}).", flush=True)
             return {
                 "status": "failed", "channel_used": "whatsapp", "real_send": False,

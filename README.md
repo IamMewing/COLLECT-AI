@@ -83,6 +83,22 @@ documented). Everything here degrades gracefully with PayPal unconfigured
 (`GET /api/paypal/status` tells you the current state) — the rest of the
 pipeline still runs.
 
+## The Approval Gate tells you the truth about delivery
+
+A send result is only useful if it's honest. Early on, `approve_and_execute`
+hardcoded `status: "sent"` in its response regardless of what actually
+happened on the wire — a real SMTP exception or a Meta WhatsApp rejection
+(wrong token, recipient not yet allowlisted, no template for a cold
+business-initiated send) was silently reported to the UI as a success. That
+got caught and fixed: the Approval Gate now reflects the *real* outcome —
+"SENT" only when something genuinely left the server, "NOT SENT" plus the
+provider's own error text otherwise (e.g. `WHATSAPP rejected this: 131030:
+Recipient phone number not in allowed list`), and a distinct note when a
+send was simulated because no real credentials were configured. The same
+discipline that shaped the PayPal Invoicing 403 and the WhatsApp
+session-window handling above — surface the real constraint, don't paper
+over it — applies to the UI's own truthfulness about what it just did.
+
 ## WhatsApp & SMS (multichannel outreach)
 
 Email was never going to be the only channel a collections agent needs —
@@ -118,10 +134,19 @@ registered as testers), and WhatsApp isn't subject to India's SMS-specific
 DLT rules. `agent/tools/whatsapp_tools.py` was built to Meta's documented
 request/response shape for `POST /<PHONE_NUMBER_ID>/messages`, the same
 "verify against the real contract, not memory" standard as every other
-integration in this project — see that module's docstring for the one
-caveat: this project's own sandbox has no outbound network access to
-graph.facebook.com to test a live call against, so treat it as unverified
-until it's actually been exercised from a deployed environment.
+integration in this project.
+
+**Verified live against the real Graph API**, not just built to spec: a
+real send from the deployed Cloud Run service to a verified test recipient
+returns a genuine Meta message ID (`wamid....`), confirming end-to-end
+auth, payload shape, and recipient-allowlist handling all actually work
+against `graph.facebook.com`. One caveat worth naming rather than glossing
+over: Meta's own API accepting a send (`real_send: true`, a real message
+ID) doesn't always guarantee the message lands on the recipient's device —
+delivery through a brand-new, still-Development-mode WhatsApp test app can
+be inconsistent even after the API itself confirms acceptance. That's a
+known characteristic of unlaunched WhatsApp Business apps, not a gap in
+this integration — the request/response handling is correct and proven.
 
 **The constraint that shaped WhatsApp's session handling, found by reading
 Meta/Twilio's own docs instead of assuming WhatsApp works like email:**

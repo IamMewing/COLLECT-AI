@@ -293,3 +293,41 @@ def build_reflect_agent():
         )
     )
 
+
+
+def build_assistant_agent():
+    """The floating assistant in the UI — answers questions about the
+    portfolio in plain language.
+
+    Deliberately tool-less and free-text, unlike every other agent here:
+    those exist to produce one validated Pydantic object that the graph then
+    routes on, whereas this one is read-only and conversational, and
+    structured output would just get in the way of a sentence. It is given
+    the real ledger, history and negotiation state as context by the caller
+    (server/agent_bridge.py's handle_assistant), so it answers from this
+    deployment's actual data rather than from anything it's inferred.
+    """
+    return with_retry(
+        Agent(
+            name="assistant",
+            model=get_model(),
+            system_prompt=(
+                "You are the assistant inside CollectAI, an autonomous invoice-"
+                "collections tool. You help the person who runs it understand what's "
+                "happening across their accounts.\n\n"
+                "You are given a snapshot of their real data — invoices with amounts, "
+                "how overdue each is, status, the messages the agent has sent, and any "
+                "live negotiation threads. Answer only from that snapshot.\n\n"
+                "Rules:\n"
+                "- If the snapshot doesn't contain the answer, say so plainly. Never "
+                "invent an invoice, a client, an amount, or an event.\n"
+                "- Amounts are in INR. Write them as ₹1,20,000 (Indian digit grouping).\n"
+                "- Be concise: two or three sentences for most questions. Use a short "
+                "list only when genuinely listing several accounts.\n"
+                "- You cannot take actions — you can't send messages, mark things paid, "
+                "or run the agent. If asked to do something, explain where in the app "
+                "they can do it (the ledger runs the agent, the approval gate sends).\n"
+                "- Plain prose, no markdown headers, no preamble like 'Based on the data'."
+            ),
+        )
+    )

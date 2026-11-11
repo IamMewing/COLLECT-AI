@@ -229,6 +229,20 @@ async function handleVoiceTurn(invoiceId, transcript, invoice = null) {
   return callAgentBridge('voice_turn', { invoice_id: invoiceId, transcript, invoice });
 }
 
+/**
+ * The floating assistant's one call: a plain-language question about the
+ * portfolio, answered from real data. The invoice ledger lives on this side
+ * (server/store.js), so the caller passes it through rather than having the
+ * Python side try to read a store it doesn't own; message history and live
+ * negotiation threads are pulled from agent/memory.py there.
+ *
+ * @param {string} question
+ * @param {object[]} invoices - the ledger, already status-merged.
+ */
+async function askAssistant(question, invoices) {
+  return callAgentBridge('assistant', { question, invoices });
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
@@ -238,4 +252,5 @@ module.exports = {
   getNegotiationState,
   handleIncomingText,
   handleVoiceTurn,
+  askAssistant,
 };

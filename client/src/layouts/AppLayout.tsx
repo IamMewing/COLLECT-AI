@@ -5,6 +5,7 @@ import { Nav } from '../components/Nav';
 import { LiquidBlobs } from '../components/LiquidBlobs';
 import { PipelineRail } from '../components/PipelineRail';
 import { AddInvoiceForm } from '../components/AddInvoiceForm';
+import { Assistant } from '../components/Assistant';
 import { useAppState } from '../AppState';
 import { useNotifications } from '../notifications';
 
@@ -63,6 +64,8 @@ export const AppLayout: React.FC = () => {
         error={error}
         nudged={!!error}
       />
+
+      <Assistant />
 
       {showAddInvoice && (
         <AddInvoiceForm onClose={() => setShowAddInvoice(false)} onCreated={handleInvoiceCreated} />

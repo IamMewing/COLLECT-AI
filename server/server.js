@@ -7,7 +7,7 @@ const rateLimit = require('express-rate-limit');
 const twilio = require('twilio');
 require('dotenv').config();
 
-const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText, handleVoiceTurn } = require('./agentService');
+const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText, handleVoiceTurn, askAssistant } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
 const notifications = require('./notifications');
@@ -1316,6 +1316,46 @@ app.get('/api/agent/negotiations', async (req, res) => {
     res.status(error.status || 500).json({
       error: error.error || 'Failed to load negotiation state',
       details: error.details || error.message || 'Unknown error occurred',
+    });
+  }
+});
+
+// ── Floating assistant ──────────────────────────────────────────────────────
+/**
+ * POST /api/agent/assistant
+ * A plain-language question about the portfolio, answered from this
+ * deployment's real data. Read-only by construction: the agent behind it
+ * has no tools, so the worst a prompt injection in an invoice's client name
+ * could achieve is a misleading sentence, not an action.
+ *
+ * Shares agentLimiter with sweep/approve rather than getting its own budget
+ * — it's the same metered model spend out of the same shared key, and a
+ * chat box is the easiest of all of these to hammer.
+ */
+app.post('/api/agent/assistant', agentLimiter, async (req, res) => {
+  try {
+    const question = (req.body?.question || '').toString().trim();
+    if (!question) {
+      return res.status(400).json({ error: 'No question', details: 'Send a { question } string.' });
+    }
+    if (question.length > 1000) {
+      return res.status(400).json({ error: 'Question too long', details: 'Keep it under 1000 characters.' });
+    }
+
+    const statusMap = await store.loadInvoiceStatus();
+    const invoices = (await store.loadUserInvoices()).map((inv) => ({
+      ...inv,
+      ...normalizeStatusEntry(statusMap[inv.invoice_id]),
+    }));
+
+    const result = await askAssistant(question, invoices);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [POST /api/agent/assistant] Failed:', error);
+    res.status(error.status || 500).json({
+      error: error.error || 'The assistant could not answer',
+      details: error.details || error.message || 'Unknown error occurred',
+      stderr: error.stderr || null,
     });
   }
 });

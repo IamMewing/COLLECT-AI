@@ -347,6 +347,113 @@ def handle_negotiation_state(payload: dict) -> dict:
     }
 
 
+def _inr(amount) -> str:
+    """Indian digit grouping (₹1,20,000, not ₹120,000) — the model is told to
+    use it, and the context it reads should already be written that way so
+    it has an example rather than just an instruction."""
+    try:
+        n = int(round(float(amount)))
+    except (TypeError, ValueError):
+        return str(amount)
+    s = str(abs(n))
+    if len(s) > 3:
+        head, tail = s[:-3], s[-3:]
+        parts = []
+        while len(head) > 2:
+            parts.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            parts.insert(0, head)
+        s = ",".join(parts) + "," + tail
+    return f"₹{'-' if n < 0 else ''}{s}"
+
+
+def handle_assistant(payload: dict) -> dict:
+    """The floating assistant: answers a question about the portfolio in
+    plain language.
+
+    Node owns the invoice ledger (server/store.js), so it passes the
+    invoices in rather than this side trying to read them; everything else
+    — what was actually sent, which threads are live — comes from
+    agent/memory.py, which is already this process's responsibility.
+
+    Mock mode gets a deterministic non-LLM answer for the same reason every
+    other mock path exists: so the UI can be built and demoed without an
+    API key or spend.
+    """
+    question = (payload.get("question") or "").strip()
+    if not question:
+        return {"answer": "Ask me something about your accounts and I'll take a look."}
+
+    invoices = payload.get("invoices") or []
+    history_limit = int(payload.get("history_limit") or 15)
+
+    if USE_MOCK:
+        active = [i for i in invoices if (i.get("status") or "active") != "paid"]
+        owed = sum(float(i.get("amount") or 0) for i in active)
+        return {
+            "answer": (
+                f"[MOCK] You have {len(active)} open account(s) worth {_inr(owed)} "
+                f"across {len(invoices)} invoice(s) on the ledger. Set USE_MOCK=false "
+                "with a real model key to get an actual answer here."
+            ),
+            "mock": True,
+        }
+
+    from agent.memory import list_message_history, get_conversation
+    from agent.agents import build_assistant_agent
+
+    lines = ["LEDGER:"]
+    if not invoices:
+        lines.append("  (no invoices on the books yet)")
+    for inv in invoices:
+        status = inv.get("status") or "active"
+        contact = inv.get("email") or inv.get("phone") or "no contact on file"
+        lines.append(
+            f"  - {inv.get('invoice_id')} | {inv.get('client_name')} | {_inr(inv.get('amount'))} "
+            f"| {inv.get('days_overdue')} days overdue | {inv.get('ignored_reminders')} ignored reminders "
+            f"| status: {status} | contact: {contact}"
+        )
+
+    try:
+        history = list_message_history(limit=history_limit)
+    except Exception:  # noqa: BLE001 - context is best-effort; a question is still answerable without it
+        history = []
+    lines.append("\nRECENT MESSAGES THE AGENT SENT:")
+    if not history:
+        lines.append("  (nothing sent yet)")
+    for h in history:
+        lines.append(
+            f"  - {h.get('timestamp', '')} | {h.get('client_name', '?')} | {h.get('channel', 'email')} "
+            f"| {h.get('status', '')} | subject: {h.get('subject') or '—'}"
+        )
+
+    lines.append("\nLIVE NEGOTIATION THREADS:")
+    threads = 0
+    for inv in invoices:
+        try:
+            convo = get_conversation(inv.get("invoice_id"))
+        except Exception:  # noqa: BLE001
+            convo = None
+        if convo and convo.get("status") == "active":
+            threads += 1
+            turns = convo.get("turns") or []
+            lines.append(
+                f"  - {inv.get('invoice_id')} ({inv.get('client_name')}): {len(turns)} turn(s), "
+                f"last from {turns[-1].get('role', '?') if turns else '—'}"
+            )
+    if threads == 0:
+        lines.append("  (none active)")
+
+    context = "\n".join(lines)
+    agent = build_assistant_agent()
+    result = agent(f"{context}\n\nQUESTION: {question}")
+
+    # Strands Agent returns a result object whose str() is the text; .message
+    # shapes vary by version, so stringify rather than reaching into it.
+    return {"answer": str(result).strip(), "mock": False}
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -377,11 +484,13 @@ def main():
                 res = handle_voice_turn(payload)
             elif action == "negotiation_state":
                 res = handle_negotiation_state(payload)
+            elif action == "assistant":
+                res = handle_assistant(payload)
             else:
                 raise ValueError(
                     f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', "
                     "'payment_confirmed', 'check_replies', 'installment_paid', "
-                    "'incoming_text', 'voice_turn', and 'negotiation_state'."
+                    "'incoming_text', 'voice_turn', 'negotiation_state', and 'assistant'."
                 )
 
         json.dump(res, sys.stdout)

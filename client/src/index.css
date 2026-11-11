@@ -616,6 +616,21 @@ body { overflow-x: hidden; }
 .inp:focus { background: var(--ink-08); }
 .field--ink .inp:focus, .slab--fill-ink .inp:focus { background: var(--paper-18); }
 
+/* Number steppers are the one control here still drawn by the OS — grey
+   chrome glued to the field edge, in no palette colour, on every browser.
+   Everything else in this app (grid, cursor, scrollbar) is reskinned or
+   removed rather than left as default chrome, so these go too; the amount
+   and rate fields are typed in anyway, not dialed with arrows. */
+input[type='number'].inp::-webkit-outer-spin-button,
+input[type='number'].inp::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'].inp {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .lbl {
   display: block;
   font-family: var(--data);

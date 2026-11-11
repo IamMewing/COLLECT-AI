@@ -28,7 +28,7 @@ const LINKS = [
  * sections, and the landing page stacks several of them in one scroll.
  */
 export const Nav: React.FC<{ unreadCount?: number }> = ({ unreadCount = 0 }) => {
-  const [on, setOn] = useState<'mint' | 'ink' | 'coral'>('mint');
+  const [on, setOn] = useState<'ultra' | 'ink' | 'lime'>('ultra');
 
   useEffect(() => {
     let raf = 0;
@@ -41,7 +41,7 @@ export const Nav: React.FC<{ unreadCount?: number }> = ({ unreadCount = 0 }) => 
       for (const el of fields) {
         const r = el.getBoundingClientRect();
         if (r.top <= probe && r.bottom > probe) {
-          setOn((el.dataset.field as 'mint' | 'ink' | 'coral') ?? 'mint');
+          setOn((el.dataset.field as 'ultra' | 'ink' | 'lime') ?? 'ultra');
           return;
         }
       }

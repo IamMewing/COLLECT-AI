@@ -1,32 +1,46 @@
 /* ==========================================================================
    CollectAI — design system
-   Three flat fields (mint / ink / coral). Enormous grotesque type. One bold
+   Three flat fields (ultramarine / ink / lime). Enormous grotesque type. One bold
    move: an ink trail that knocks the type out beneath it. Nothing soft.
    ========================================================================== */
 
 :root {
-  /* Two colours and black. Both are FIELDS, not accents — the page is built
-     out of them rather than decorated with them. */
-  --mint: #2BE38A;
-  --mint-deep: #1FC979;
-  --coral: #FF6B4D;
-  --coral-deep: #EC5436;
-  --ink:   #000000;
-  --bone:  #F7F4EC;   /* neutral, for small surfaces only */
+  /* Ultramarine. Two brand colours and black — all three are FIELDS, the page
+     is built out of them rather than decorated with them — plus one alert
+     that is never a field.
 
-  /* State is field-aware: on a light field hue can't carry it (coral on mint
-     is unreadable), so weight and shape do, and the colour stays ink. On the
-     ink field the two brand colours take over. Overridden per .field below. */
+     --ultra and --lime are difference-complements of each other through the
+     cursor's fill (see LiquidBlobs.tsx): dragging the mass across --ultra
+     reveals exactly --lime, and across --lime reveals exactly --ultra. Ultra's
+     green channel is 0x00 rather than 0x2B for precisely that reason — a
+     difference blend can only reach |43 - 255| = 212 in a channel that starts
+     at 0x2B, so the reveal would land on an olive #CCD400 instead of true
+     lime. Change any of these hexes and the FILL table in LiquidBlobs.tsx has
+     to be recomputed with it. */
+  --ultra: #1B00FF;
+  --ultra-deep: #1400C7;
+  --lime: #CCFF00;
+  --lime-deep: #B2E000;
+  --flare: #FF0078;     /* alert only — never a field */
+  --ink:   #0A0A0A;
+  --paper: #F4F4EF;
+
+  /* State is field-aware: on the light (lime) field hue can't carry it —
+     flare on lime is 3.2:1, fine behind a tag and not fine as text — so
+     weight and shape do, and the colour stays ink. On the two dark fields
+     the brand colours take over. Overridden per .field below. */
   --warn: var(--ink);   /* at risk / overdue / needs attention */
   --ok:   var(--ink);   /* settled / paid / fine */
 
-  --ink-60: rgba(0,0,0,0.6);
-  --ink-45: rgba(0,0,0,0.45);
-  --ink-18: rgba(0,0,0,0.18);
-  --ink-08: rgba(0,0,0,0.08);
-  --mint-60: rgba(43,227,138,0.6);
-  --mint-45: rgba(43,227,138,0.45);
-  --mint-18: rgba(43,227,138,0.18);
+  --ink-60: rgba(10,10,10,0.6);
+  --ink-45: rgba(10,10,10,0.45);
+  --ink-18: rgba(10,10,10,0.18);
+  --ink-08: rgba(10,10,10,0.08);
+  /* Type on the dark fields is paper, so these alphas are paper's. */
+  --paper-60: rgba(244,244,239,0.6);
+  --paper-45: rgba(244,244,239,0.45);
+  --paper-18: rgba(244,244,239,0.18);
+  --paper-08: rgba(244,244,239,0.08);
 
   --display: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   --data: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
@@ -59,12 +73,12 @@ html, body, #root {
 
 body { overflow-x: hidden; }
 
-::selection { background: var(--ink); color: var(--mint); }
-.field--ink ::selection { background: var(--mint); color: var(--ink); }
+::selection { background: var(--ink); color: var(--lime); }
+.field--ink ::selection { background: var(--lime); color: var(--ink); }
 
 ::-webkit-scrollbar { width: 11px; }
 ::-webkit-scrollbar-track { background: var(--ink); }
-::-webkit-scrollbar-thumb { background: var(--mint); }
+::-webkit-scrollbar-thumb { background: var(--lime); }
 ::-webkit-scrollbar-thumb:hover { background: #fff; }
 
 :focus-visible {
@@ -80,11 +94,12 @@ body { overflow-x: hidden; }
   width: 100%;
   padding: clamp(56px, 9vw, 130px) var(--gutter);
 }
-.field--mint { background: var(--mint); color: var(--ink); }
-.field--ink  { background: var(--ink);  color: var(--mint); }
+.field--ultra { background: var(--ultra); color: var(--paper); }
+.field--ink  { background: var(--ink);  color: var(--paper); }
 /* On the ink field the two brand colours can carry state directly. */
-.field--ink  { --warn: var(--coral); --ok: var(--mint); }
-.field--coral { background: var(--coral); color: var(--ink); }
+/* Both dark fields let hue carry state; the light one can't. */
+.field--ink, .field--ultra { --warn: var(--flare); --ok: var(--lime); }
+.field--lime { background: var(--lime); color: var(--ink); }
 
 .field--flush { padding-top: 0; }
 .field--tight { padding-block: clamp(40px, 6vw, 80px); }
@@ -216,23 +231,23 @@ body { overflow-x: hidden; }
 }
 .pill:hover::before,
 .pill:focus-visible::before { transform: translateY(0); }
-.pill:hover { color: var(--pill-inv, var(--mint)); }
+.pill:hover { color: var(--pill-inv, var(--lime)); }
 .pill:active { transform: scale(0.97); }
 .pill:disabled { opacity: 0.32; cursor: not-allowed; }
 .pill:disabled::before { transform: translateY(101%); }
 
 /* field-aware variants */
-.field--ink .pill,  .pill--on-ink  { --pill-fg: var(--mint); --pill-inv: var(--ink); }
-.field--mint .pill, .pill--on-mint { --pill-fg: var(--ink);  --pill-inv: var(--mint); }
-.field--coral .pill, .pill--on-coral { --pill-fg: var(--ink);  --pill-inv: var(--coral); }
+.field--ink .pill,  .pill--on-ink  { --pill-fg: var(--lime); --pill-inv: var(--ink); }
+.field--ultra .pill, .pill--on-ultra { --pill-fg: var(--paper); --pill-inv: var(--ultra); }
+.field--lime .pill, .pill--on-lime { --pill-fg: var(--ink);  --pill-inv: var(--lime); }
 
 /* solid, high-priority action */
-.pill--solid { background: var(--pill-fg); color: var(--pill-inv, var(--mint)); }
-.pill--solid::before { background: var(--pill-inv, var(--mint)); }
+.pill--solid { background: var(--pill-fg); color: var(--pill-inv, var(--lime)); }
+.pill--solid::before { background: var(--pill-inv, var(--lime)); }
 .pill--solid:hover { color: var(--pill-fg); }
 
-.pill--go     { --pill-fg: var(--ok);    --pill-inv: var(--mint); }
-.pill--stop   { --pill-fg: var(--warn);  --pill-inv: var(--coral); }
+.pill--go     { --pill-fg: var(--ok);    --pill-inv: var(--lime); }
+.pill--stop   { --pill-fg: var(--warn);  --pill-inv: var(--flare); }
 .pill--lg     { padding: 17px 36px; font-size: 0.95rem; }
 .pill--sm     { padding: 9px 17px;  font-size: 0.72rem; }
 .pill--icon   { padding: 11px; border-radius: 999px; }
@@ -255,17 +270,17 @@ body { overflow-x: hidden; }
   white-space: nowrap;
 }
 .tag--solid  { background: currentColor; }
-.tag--solid > * { color: var(--mint); }
-/* State reads as a filled chip, not as coloured text — coral on mint is
+.tag--solid > * { color: var(--lime); }
+/* State reads as a filled chip, not as coloured text — flare on lime is
    unreadable as type, and red/green were never in this palette. */
-.tag--risk   { background: var(--coral);  color: var(--ink); border-color: var(--ink); }
-.tag--paid   { background: var(--ink);   color: var(--mint); border-color: var(--ink); }
-.field--ink .tag--risk { background: var(--coral);  color: var(--ink); border-color: var(--coral); }
-.field--ink .tag--paid { background: var(--mint); color: var(--ink); border-color: var(--mint); }
-/* On the coral field a coral chip is invisible, so the fill inverts and the two
+.tag--risk   { background: var(--flare);  color: var(--ink); border-color: var(--ink); }
+.tag--paid   { background: var(--ink);   color: var(--lime); border-color: var(--ink); }
+.field--ink .tag--risk { background: var(--flare);  color: var(--ink); border-color: var(--flare); }
+.field--ink .tag--paid { background: var(--lime); color: var(--ink); border-color: var(--lime); }
+/* On the lime field a lime chip is invisible, so the fill inverts and the two
    states separate by their type colour instead. */
-.field--coral .tag--risk { background: var(--ink); color: var(--coral);  border-color: var(--ink); }
-.field--coral .tag--paid { background: var(--ink); color: var(--mint); border-color: var(--ink); }
+.field--lime .tag--risk { background: var(--ink); color: var(--flare);  border-color: var(--ink); }
+.field--lime .tag--paid { background: var(--ink); color: var(--lime); border-color: var(--ink); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; position: relative; }
 /* The pulse is a scaling pseudo-element rather than a spreading box-shadow,
@@ -291,9 +306,9 @@ body { overflow-x: hidden; }
   padding: clamp(18px, 2.4vw, 30px);
   position: relative;
 }
-.slab--fill-ink  { background: var(--ink);  color: var(--mint); }
-.slab--fill-mint { background: var(--mint); color: var(--ink); }
-.slab--fill-bone { background: var(--bone); color: var(--ink); }
+.slab--fill-ink  { background: var(--ink);  color: var(--paper); }
+.slab--fill-ultra { background: var(--ultra); color: var(--paper); }
+.slab--fill-paper { background: var(--paper); color: var(--ink); }
 
 
 .rule { height: 2px; background: currentColor; border: 0; opacity: 1; }
@@ -332,8 +347,9 @@ body { overflow-x: hidden; }
 
 /* ==========================================================================
    LIQUID BLOBS — the one bold move.
-   Mint fill + difference blend: reads black over the mint field, and knocks
-   the type beneath it out to mint. Same layer inverts over the ink field.
+   A per-field fill + difference blend: the mass carries the opposite brand
+   colour (lime over ultramarine and ink, ultramarine over lime) and knocks the
+   type beneath it out to a third. The arithmetic lives in LiquidBlobs.tsx.
    ========================================================================== */
 /* Deliberately NOT inset:0. This is a small box that follows the mass, because
    the blend makes the compositor re-blend every pixel it covers against the
@@ -367,7 +383,7 @@ body { overflow-x: hidden; }
   width: 54px;
   height: 54px;
   border-radius: 50%;
-  background: var(--mint);
+  background: var(--lime);
   animation: boot-dot 1.35s var(--inout) forwards;
 }
 @keyframes boot-dot {
@@ -390,15 +406,15 @@ body { overflow-x: hidden; }
   justify-content: space-between;
   gap: 16px;
   padding: 18px var(--gutter);
-  color: var(--ink);
+  color: var(--paper);
   /* The plate is painted in whichever field is behind it, so it reads as the
      field simply continuing rather than as a chrome bar — while still stopping
      content from scrolling illegibly under the wordmark. */
-  background: var(--mint);
+  background: var(--ultra);
   transition: color 0.45s var(--out), background 0.45s var(--out);
 }
-.nav[data-on='ink']  { color: var(--mint); background: var(--ink); }
-.nav[data-on='coral'] { color: var(--ink);  background: var(--coral); }
+.nav[data-on='ink']  { color: var(--paper); background: var(--ink); }
+.nav[data-on='lime'] { color: var(--ink);  background: var(--lime); }
 
 /* The nav is fixed, so it is inside no field and its pills never pick up a
    field's colours — they kept the root's and went invisible the moment the
@@ -406,9 +422,9 @@ body { overflow-x: hidden; }
    section. Setting the variables on .nav itself does NOT fix it: .pill
    declares --pill-fg on itself, and a property set on the element beats one
    inherited from an ancestor. It has to be targeted at the pill. */
-.nav[data-on='mint'] .pill { --pill-fg: var(--ink);  --pill-inv: var(--mint); }
-.nav[data-on='ink']  .pill { --pill-fg: var(--mint); --pill-inv: var(--ink); }
-.nav[data-on='coral'] .pill { --pill-fg: var(--ink);  --pill-inv: var(--coral); }
+.nav[data-on='ultra'] .pill { --pill-fg: var(--paper); --pill-inv: var(--ultra); }
+.nav[data-on='ink']  .pill { --pill-fg: var(--lime); --pill-inv: var(--ink); }
+.nav[data-on='lime'] .pill { --pill-fg: var(--ink);  --pill-inv: var(--lime); }
 
 .brand {
   display: inline-flex;
@@ -432,7 +448,7 @@ body { overflow-x: hidden; }
 
 /* ==========================================================================
    PIPELINE RAIL — the agent's state, kept on screen
-   An ink plate with a mint edge, which is legible over all three fields, so
+   An ink plate with a lime edge, which is legible over all three fields, so
    it needs none of the field-tracking the nav does.
    ========================================================================== */
 .prail {
@@ -447,9 +463,9 @@ body { overflow-x: hidden; }
   gap: 14px;
   padding: 11px 18px 11px 16px;
   background: var(--ink);
-  border: 2px solid var(--mint);
+  border: 2px solid var(--lime);
   border-radius: 999px;
-  color: var(--mint);
+  color: var(--lime);
   cursor: pointer;
   font: inherit;
   /* Parked just below the fold until the pipeline is behind you. */
@@ -468,7 +484,7 @@ body { overflow-x: hidden; }
   pointer-events: auto;
 }
 .prail:hover { border-color: #fff; }
-.prail:focus-visible { outline: 3px solid var(--mint); outline-offset: 4px; }
+.prail:focus-visible { outline: 3px solid var(--lime); outline-offset: 4px; }
 
 .prail-cap {
   font-size: 0.68rem;
@@ -484,13 +500,13 @@ body { overflow-x: hidden; }
   stroke-linecap: round;
   transition: stroke 0.4s linear, opacity 0.4s linear;
 }
-.prail-seg--idle    { stroke: var(--mint); opacity: 0.26; }
-.prail-seg--skipped { stroke: var(--mint); opacity: 0.4; stroke-dasharray: 1.6 2; }
-.prail-seg--done    { stroke: var(--mint); opacity: 1; }
-.prail-seg--live    { stroke: var(--mint); opacity: 1; }
+.prail-seg--idle    { stroke: var(--lime); opacity: 0.26; }
+.prail-seg--skipped { stroke: var(--lime); opacity: 0.4; stroke-dasharray: 1.6 2; }
+.prail-seg--done    { stroke: var(--lime); opacity: 1; }
+.prail-seg--live    { stroke: var(--lime); opacity: 1; }
 
-.prail-node { color: var(--mint); transition: color 0.4s linear; }
-.prail-node--error { color: var(--coral); }
+.prail-node { color: var(--lime); transition: color 0.4s linear; }
+.prail-node--error { color: var(--flare); }
 .prail-ring {
   fill: none;
   stroke: currentColor;
@@ -598,7 +614,7 @@ body { overflow-x: hidden; }
 }
 .inp::placeholder { color: currentColor; opacity: 0.38; }
 .inp:focus { background: var(--ink-08); }
-.field--ink .inp:focus, .slab--fill-ink .inp:focus { background: var(--mint-18); }
+.field--ink .inp:focus, .slab--fill-ink .inp:focus { background: var(--paper-18); }
 
 .lbl {
   display: block;
@@ -632,7 +648,7 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   max-width: 540px;
   max-height: 88vh;
   overflow-y: auto;
-  background: var(--mint);
+  background: var(--paper);
   color: var(--ink);
   border: 2px solid var(--ink);
   padding: clamp(22px, 3vw, 34px);
@@ -860,8 +876,8 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
 .pf-reason {
   margin-top: clamp(18px, 2.4vw, 28px);
   padding: clamp(14px, 2vw, 20px) clamp(16px, 2.2vw, 24px);
-  border: 1.5px solid var(--mint-45);
-  background: var(--mint-08, rgba(43,227,138,0.08));
+  border: 1.5px solid var(--paper-45);
+  background: var(--paper-08, rgba(244,244,239,0.08));
   animation: pf-reason-in 0.32s var(--out);
 }
 @keyframes pf-reason-in {
@@ -948,9 +964,13 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
    ========================================================================== */
 .grid-shell { border: 2px solid var(--ink); }
 .grid-shell .ag-root-wrapper { border: 0; background: transparent; }
+/* The table is a dark panel laid onto the ultramarine field (see the theme
+   params in InvoiceGrid.tsx), so everything below reads light-on-dark. It
+   used to be the reverse — a light mint table with ink rules — and these
+   rules all had --ink where they now have --paper. */
 .grid-shell .ag-header {
   border-bottom: 2px solid var(--ink);
-  background: var(--ink);
+  background: var(--ultra);
 }
 .grid-shell .ag-header-cell-text {
   font-family: var(--data);
@@ -958,27 +978,29 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--mint);
+  color: var(--lime);
 }
 .grid-shell .ag-header-cell::after,
 .grid-shell .ag-header-group-cell::after { display: none; }
-.grid-shell .ag-icon { color: var(--mint); }
-.grid-shell .ag-row { border-bottom: 2px solid var(--ink-18); background: transparent; }
-.grid-shell .ag-row-hover { background: var(--ink-08) !important; }
+.grid-shell .ag-icon { color: var(--lime); }
+.grid-shell .ag-row { border-bottom: 2px solid var(--paper-18); background: transparent; }
+.grid-shell .ag-row-hover { background: rgba(204,255,0,0.10) !important; }
+/* Selection has to differ from the panel itself, which is already ink —
+   so it takes the field's blue and the lime type goes with it. */
 .grid-shell .ag-row-selected,
-.grid-shell .ag-row-selected::before { background: var(--ink) !important; color: var(--mint) !important; }
-.grid-shell .ag-row-selected .ag-cell { color: var(--mint); }
+.grid-shell .ag-row-selected::before { background: var(--ultra) !important; color: var(--lime) !important; }
+.grid-shell .ag-row-selected .ag-cell { color: var(--lime); }
 .grid-shell .ag-cell {
   font-family: var(--data);
   font-size: 0.84rem;
   font-variant-numeric: tabular-nums;
-  color: var(--ink);
+  color: var(--paper);
   display: flex;
   align-items: center;
 }
 .grid-shell .ag-cell-focus { outline: none !important; border-color: transparent !important; }
-.grid-shell .ag-paging-panel { border-top: 2px solid var(--ink); color: var(--ink); font-family: var(--data); }
-.grid-shell .ag-overlay-no-rows-center { font-family: var(--data); color: var(--ink); }
+.grid-shell .ag-paging-panel { border-top: 2px solid var(--paper-18); color: var(--paper); font-family: var(--data); }
+.grid-shell .ag-overlay-no-rows-center { font-family: var(--data); color: var(--paper); }
 
 /* ==========================================================================
    HERO
@@ -1111,9 +1133,9 @@ main > :last-child { flex: 1 0 auto; }
   max-height: min(70vh, 480px);
   display: flex;
   flex-direction: column;
-  background: var(--coral);
-  color: var(--ink);
-  border: 2px solid #fff;
+  background: var(--flare);
+  color: var(--paper);
+  border: 2px solid var(--paper);
   overflow: hidden;
 }
 .toast-head {
@@ -1140,7 +1162,7 @@ main > :last-child { flex: 1 0 auto; }
   height: 17px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--coral);
+  background: var(--flare);
   color: var(--ink);
   border: 2px solid currentColor;
   font-family: var(--data);
@@ -1149,7 +1171,7 @@ main > :last-child { flex: 1 0 auto; }
   line-height: 13px;
   text-align: center;
 }
-.nav[data-on='coral'] .nav-bell-count { background: var(--ink); color: var(--coral); }
+.nav[data-on='lime'] .nav-bell-count { background: var(--ink); color: var(--flare); }
 
 /* Notification feed. */
 .notif-list { list-style: none; display: flex; flex-direction: column; }
@@ -1163,9 +1185,9 @@ main > :last-child { flex: 1 0 auto; }
 .notif:last-child { border-bottom: 2px solid currentColor; }
 .notif.is-unread { opacity: 1; }
 .notif-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 2px solid currentColor; }
-.notif--payment .notif-icon { background: var(--mint); color: var(--ink); border-color: var(--mint); }
+.notif--payment .notif-icon { background: var(--lime); color: var(--ink); border-color: var(--lime); }
 .notif--failed .notif-icon,
-.notif--escalation .notif-icon { background: var(--coral); color: var(--ink); border-color: var(--coral); }
+.notif--escalation .notif-icon { background: var(--flare); color: var(--ink); border-color: var(--flare); }
 .notif-main { min-width: 0; }
 .notif-title {
   font-family: var(--display);
@@ -1176,7 +1198,7 @@ main > :last-child { flex: 1 0 auto; }
   align-items: center;
   gap: 9px;
 }
-.notif-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--coral); flex: none; }
+.notif-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--flare); flex: none; }
 .notif-body { margin-top: 7px; opacity: 0.85; }
 .notif-meta { margin-top: 9px; opacity: 0.55; }
 
@@ -1186,7 +1208,7 @@ main > :last-child { flex: 1 0 auto; }
 /* Fixed to the bottom-right, above everything except the error toast (which
    sits bottom-LEFT so the two never fight for the same corner). Carries its
    own ink field rather than inheriting the page's tone — it has to be
-   legible over mint, ink and coral alike. */
+   legible over ultramarine, ink and lime alike. */
 .assistant-fab {
   position: fixed;
   right: var(--gutter);
@@ -1195,15 +1217,17 @@ main > :last-child { flex: 1 0 auto; }
   width: 54px;
   height: 54px;
   border-radius: 999px;
-  border: 2px solid var(--ink);
+  /* The ring is lime, not ink: an ink disc on the ink field left nothing but
+     a floating icon with no button around it. Lime reads on all three. */
+  border: 2px solid var(--lime);
   background: var(--ink);
-  color: var(--mint);
+  color: var(--lime);
   display: grid;
   place-items: center;
   cursor: pointer;
   transition: transform 0.25s var(--out), background 0.25s var(--out), color 0.25s var(--out);
 }
-.assistant-fab:hover { transform: translateY(-2px) scale(1.04); background: var(--mint); color: var(--ink); }
+.assistant-fab:hover { transform: translateY(-2px) scale(1.04); background: var(--lime); color: var(--ink); }
 .assistant-fab:active { transform: scale(0.96); }
 
 .assistant {
@@ -1216,8 +1240,8 @@ main > :last-child { flex: 1 0 auto; }
   display: flex;
   flex-direction: column;
   background: var(--ink);
-  color: var(--mint);
-  border: 2px solid var(--mint);
+  color: var(--paper);
+  border: 2px solid var(--lime);
   animation: assistant-in 0.3s var(--out);
 }
 @keyframes assistant-in {
@@ -1231,7 +1255,7 @@ main > :last-child { flex: 1 0 auto; }
   align-items: center;
   gap: 12px;
   padding: 16px 18px;
-  border-bottom: 2px solid var(--mint-18);
+  border-bottom: 2px solid var(--paper-18);
 }
 .assistant-x { background: none; border: 0; color: inherit; cursor: pointer; padding: 2px; }
 .assistant-scroll {
@@ -1245,7 +1269,7 @@ main > :last-child { flex: 1 0 auto; }
 }
 .assistant-intro { opacity: 0.7; margin: 0; }
 .assistant-suggestions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.assistant-suggestions .pill { --pill-fg: var(--mint); --pill-inv: var(--ink); text-align: left; }
+.assistant-suggestions .pill { --pill-fg: var(--lime); --pill-inv: var(--ink); text-align: left; }
 
 .assistant-turn {
   font-size: 0.9rem;
@@ -1256,7 +1280,7 @@ main > :last-child { flex: 1 0 auto; }
 .assistant-turn--you {
   align-self: flex-end;
   max-width: 85%;
-  background: var(--mint);
+  background: var(--lime);
   color: var(--ink);
   padding: 9px 13px;
   font-weight: 500;
@@ -1270,21 +1294,21 @@ main > :last-child { flex: 1 0 auto; }
   gap: 9px;
   align-items: center;
   padding: 14px 16px;
-  border-top: 2px solid var(--mint-18);
+  border-top: 2px solid var(--paper-18);
 }
 .assistant-input {
   flex: 1 1 auto;
   min-width: 0;
   background: none;
   border: 0;
-  border-bottom: 2px solid var(--mint-45);
+  border-bottom: 2px solid var(--paper-45);
   color: inherit;
   font-family: var(--display);
   font-size: 0.92rem;
   padding: 7px 2px;
 }
-.assistant-input::placeholder { color: var(--mint-45); }
-.assistant-input:focus { outline: none; border-bottom-color: var(--mint); }
+.assistant-input::placeholder { color: var(--paper-45); }
+.assistant-input:focus { outline: none; border-bottom-color: var(--lime); }
 
 /* The error toast owns the bottom-left; on a narrow screen they'd overlap,
    so the assistant panel goes full-width and the toast sits above it. */

@@ -1,12 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { W, H, STEPS, OVER, waveVbY, waveRegistry } from './tornWave';
 
-type Tone = 'mint' | 'ink' | 'coral';
+type Tone = 'ultra' | 'ink' | 'lime';
 
+/* Must track :root in index.css — these paint the wave itself, so a stale
+   value here shows up as a hairline of the old palette along every divider. */
 const HEX: Record<Tone, string> = {
-  mint: '#2BE38A',
-  ink: '#000000',
-  coral: '#FF6B4D',
+  ultra: '#1B00FF',
+  ink: '#0A0A0A',
+  lime: '#CCFF00',
 };
 
 /**

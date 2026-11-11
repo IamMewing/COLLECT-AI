@@ -14,10 +14,13 @@ interface PipelineFlowProps {
   onRetry?: () => void;
 }
 
-const MINT = '#2BE38A';
-const CORAL = '#FF6B4D';
-const DIM = 'rgba(43,227,138,0.32)';
-const MUTED = 'rgba(43,227,138,0.5)';
+/* The pipeline always draws on the ink field, so "live" is lime and the
+   inert states are lime stepped down rather than grey — a dead grey rail
+   under a lime one reads as broken, where a dim lime one reads as waiting. */
+const MINT = '#CCFF00';
+const CORAL = '#FF0078';
+const DIM = 'rgba(204,255,0,0.30)';
+const MUTED = 'rgba(204,255,0,0.52)';
 
 /**
  * An orb's colour says what the STEP is doing, never what it found.
@@ -181,7 +184,7 @@ export const PipelineFlow: React.FC<PipelineFlowProps> = ({
           {error.details || error.error || 'The reasoning engine timed out. Free-tier rate limits do this.'}
         </p>
         {onRetry && (
-          <button className="pill" onClick={onRetry} style={{ ['--pill-fg' as string]: CORAL, ['--pill-inv' as string]: '#000' }}>
+          <button className="pill" onClick={onRetry} style={{ ['--pill-fg' as string]: CORAL, ['--pill-inv' as string]: '#0A0A0A' }}>
             <RefreshCw size={14} /> Try again
           </button>
         )}

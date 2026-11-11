@@ -4,7 +4,7 @@ import { Hero } from '../components/Hero';
 import { Torn } from '../components/Torn';
 import { useInView } from '../useInView';
 
-type Tone = 'mint' | 'ink' | 'coral';
+type Tone = 'ultra' | 'ink' | 'lime';
 
 /** A full-bleed colour field that reveals its contents once, on first sight.
  *  This stays scroll-gated (unlike routed pages' <PageField>) because the
@@ -64,7 +64,7 @@ export const LandingPage: React.FC = () => (
   <>
     <Hero />
 
-    <Torn from="mint" to="ink" variant={0} />
+    <Torn from="ultra" to="ink" variant={0} />
     <Field
       id="how"
       tone="ink"
@@ -85,10 +85,10 @@ export const LandingPage: React.FC = () => (
       </div>
     </Field>
 
-    <Torn from="ink" to="coral" variant={2} />
+    <Torn from="ink" to="lime" variant={2} />
     <Field
       id="control"
-      tone="coral"
+      tone="lime"
       marker="Your call"
       statement="Nothing goes out until you say so"
     >
@@ -103,7 +103,7 @@ export const LandingPage: React.FC = () => (
       </div>
     </Field>
 
-    <Torn from="coral" to="ink" variant={1} />
+    <Torn from="lime" to="ink" variant={1} />
     <footer className="field field--ink field--tight" data-field="ink">
       <div className="wrap">
         <h2 className="mega" style={{ marginBottom: 'clamp(28px, 4vw, 56px)' }}>Get paid.</h2>

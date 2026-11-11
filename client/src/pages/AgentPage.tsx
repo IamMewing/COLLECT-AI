@@ -68,10 +68,10 @@ export const AgentPage: React.FC = () => {
         )}
       </PageField>
 
-      <Torn from="ink" to="coral" variant={2} />
+      <Torn from="ink" to="lime" variant={2} />
       <PageField
         id="decision"
-        tone="coral"
+        tone="lime"
         marker="Your call"
         statement="Nothing goes out until you say so"
       >

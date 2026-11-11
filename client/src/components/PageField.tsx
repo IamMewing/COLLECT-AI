@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-export type Tone = 'mint' | 'ink' | 'coral';
+export type Tone = 'ultra' | 'ink' | 'lime';
 
 /**
  * A full-bleed colour field for a routed page.

@@ -20,7 +20,7 @@ export const LedgerPage: React.FC = () => {
   return (
     <PageField
       id="ledger"
-      tone="mint"
+      tone="ultra"
       marker="The ledger"
       statement={empty ? 'Nothing on the books yet' : 'Every account it’s watching'}
       aside={

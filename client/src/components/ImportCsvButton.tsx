@@ -94,7 +94,7 @@ export const ImportCsvButton: React.FC<ImportCsvButtonProps> = ({ onImported }) 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <p className="body body--sm" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {result.created_count > 0
-                    ? <CheckCircle2 size={16} style={{ flex: 'none', color: 'var(--mint, #2BE38A)' }} />
+                    ? <CheckCircle2 size={16} style={{ flex: 'none', color: 'var(--lime, #CCFF00)' }} />
                     : <AlertTriangle size={16} style={{ flex: 'none', color: 'var(--warn)' }} />}
                   {result.created_count} of {result.created_count + result.errors.length} row
                   {result.created_count + result.errors.length === 1 ? '' : 's'} imported.

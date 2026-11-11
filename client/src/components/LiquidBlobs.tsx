@@ -2,14 +2,17 @@ import React, { useEffect, useRef } from 'react';
 import { W as VB_W, H as VB_H, GLSL_WAVE, waveRegistry } from './tornWave';
 
 /**
- * The signature move: a liquid mass of ink that trails the pointer across the
- * whole document and knocks out whatever it passes over.
+ * The signature move: a liquid mass that trails the pointer across the whole
+ * document, carrying the opposite brand colour and knocking out whatever type
+ * it passes over.
  *
- *   mint mass over the mint field -> black  (ink spreading)
- *   mint mass over black type     -> mint   (type knocks out)
+ *   mass over the ultramarine field -> lime      (and its type goes black)
+ *   mass over the lime field        -> ultramarine
+ *   mass over the ink field         -> lime      (and its type goes blue)
  *
- * via `mix-blend-mode: difference`, so one layer inverts correctly over every
- * colour field with no per-section configuration.
+ * via `mix-blend-mode: difference`, so one layer resolves correctly over every
+ * colour field with no per-section configuration — see FILL for the arithmetic
+ * that makes those land on real palette colours rather than near-misses.
  *
  * The field is a fragment shader — sum of r^2/d^2 over the chain, cut at the
  * isosurface — so the blobs genuinely merge rather than being blur-and-
@@ -94,17 +97,45 @@ const REACH = R_HEAD * SWELL * Math.sqrt(
  *  gap between two pointer events during ordinary movement. */
 const IDLE_AFTER = 110;
 
-/** What the mass is filled with over each field, chosen so that differencing
- *  it against that field lands on the right colour:
- *    mint  field - filled mint  -> black   (ink spreading over mint)
- *    coral field - filled coral -> black   (ink spreading over coral)
- *    ink   field - filled mint  -> mint
- *  Filling with one colour everywhere, which is what this did, differences
- *  against the other fields to colours that are in no part of the palette. */
+/**
+ * What the mass is filled with over each field.
+ *
+ * The layer composites with `mix-blend-mode: difference`, so what you SEE is
+ * `|backdrop - fill|` per channel — which means the fill is not the colour of
+ * the mass, it is the colour that *solves for* it. Pick the result first, then
+ * work backwards: `fill = backdrop ± result`, taking whichever branch stays
+ * inside 0–255.
+ *
+ * The rule the palette is built around: the mass carries the OTHER brand
+ * colour. Drag it across ultramarine and it reveals lime; drag it across lime
+ * and it reveals ultramarine. Two of the three solve exactly:
+ *
+ *   over ULTRA (27,0,255)  fill (231,255,255)  ->  (204,255,0)  = #CCFF00 lime
+ *   over LIME  (204,255,0) fill (177,255,255)  ->  (27,0,255)   = #1B00FF ultra
+ *   over INK   (10,10,10)  fill (214,255,10)   ->  (204,245,0)  ~ lime
+ *
+ * Ink's green is 10 short of true lime because a channel starting at 10 can
+ * reach at most |10 - 255| = 245; 4% down one channel is not something the eye
+ * resolves on a moving shape. Ultra's own green is 0x00 for the same class of
+ * reason — see the note in index.css's :root.
+ *
+ * Type knocks out of the mass for free, since the text underneath is a
+ * different backdrop running through the same subtraction:
+ *
+ *   paper type on ultra -> (13,11,16)    near-black, inside a lime mass
+ *   paper type on ink   -> (30,11,229)   ultramarine, inside a lime mass
+ *   ink type on lime    -> (167,245,245) pale cyan, inside an ultra mass
+ *
+ * So the mass is never a flat blob: it is lime with black lettering over the
+ * hero, lime with blue lettering over the dark fields, blue with pale lettering
+ * over lime. Change a palette hex and every number here has to be resolved
+ * again — a fill that no longer solves doesn't fail, it just lands on a colour
+ * from nowhere in the palette.
+ */
 const FILL: Record<string, [number, number, number]> = {
-  mint: [0.16863, 0.89020, 0.54118], // #2BE38A
-  coral: [1.0, 0.41961, 0.30196], //    #FF6B4D
-  ink: [0.16863, 0.89020, 0.54118], //  mint, so the mass reads mint on black
+  ultra: [0.90588, 1.0, 1.0], //     #E7FFFF -> reveals lime over ultramarine
+  lime: [0.69412, 1.0, 1.0], //      #B1FFFF -> reveals ultramarine over lime
+  ink: [0.83922, 1.0, 0.03922], //   #D6FF0A -> reveals lime over black
 };
 /* Must cover what a fully-extended frame actually asks for, with headroom.
    Undersized by even a few pixels, fitBox clamps to it and the mass gets cut
@@ -168,10 +199,12 @@ void main() {
     float vbX = (p.x / max(u_band.z, 1.0)) * ${VB_W}.0;
     split = u_band.x + (tornWaveVbY(vbX, u_wave.x, u_wave.y, u_wave.z) / ${VB_H}.0) * u_band.y;
   }
-  // Stepped, not blended. Both fills difference to the same colour over their
-  // own field, so a hard handover is invisible — whereas blending between them
-  // puts a 1px line of the mixture, which is a colour from no part of this
-  // palette — a grey-green between mint and coral.
+  // Stepped, not blended. Blending the two fills puts a 1px line of their
+  // mixture along the seam, which is a colour from no part of this palette.
+  // A hard handover is invisible across an ultra/ink divider (both fills
+  // resolve to lime) and deliberate across an ink/lime one, where the mass
+  // genuinely does change colour as it crosses — which is the palette's own
+  // swap, not an artefact.
   vec3 col = mix(u_colA, u_colB, step(split, p.y));
 
   // Premultiplied, to match the context and the ONE / ONE_MINUS_SRC_ALPHA
@@ -354,7 +387,7 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       to: string;
     };
     let bands: Band[] = [];
-    let baseTone = 'mint';
+    let baseTone = 'ultra';
 
     const readGeometry = () => {
       geomDirty = false;
@@ -367,13 +400,13 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
             top: r.top,
             height: r.height,
             width: r.width,
-            from: el.dataset.from || 'mint',
-            to: el.dataset.to || 'mint',
+            from: el.dataset.from || 'ultra',
+            to: el.dataset.to || 'ultra',
           };
         })
         .sort((a, b) => a.top - b.top);
       const first = document.querySelector<HTMLElement>('[data-field]');
-      baseTone = first?.dataset.field || 'mint';
+      baseTone = first?.dataset.field || 'ultra';
     };
 
     /** The two fills in play around a given height, and the divider to split
@@ -395,13 +428,13 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       if (near) {
         const wave = waveRegistry.get(near.el);
         return {
-          a: FILL[near.from] || FILL.mint,
-          b: FILL[near.to] || FILL.mint,
+          a: FILL[near.from] || FILL.ultra,
+          b: FILL[near.to] || FILL.ultra,
           band: near,
           wave,
         };
       }
-      const f = FILL[tone] || FILL.mint;
+      const f = FILL[tone] || FILL.ultra;
       return { a: f, b: f, band: null, wave: undefined };
     };
 

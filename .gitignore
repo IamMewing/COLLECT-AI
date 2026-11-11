@@ -23,6 +23,8 @@ public/assets/
 server/user_invoices.json
 server/invoice_status.json
 server/paypal_orders.json
+# Runtime-generated notification feed (server/notifications.js local fallback)
+server/notifications.json
 # Runtime-generated negotiation-loop stores (agent/memory.py's local-JSON
 # fallback) — client_memory.json is the one file here that's seeded source
 # data and stays tracked.

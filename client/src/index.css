@@ -1037,6 +1037,150 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
 }
 
 /* ==========================================================================
+   APP SHELL — page headers, empty states, toast, notifications
+   ========================================================================== */
+
+/* A short routed page (an empty ledger, a two-item history) doesn't reach
+   the bottom of the viewport on its own, which left a band of bare page
+   background below the last colour field — black, and clearly not part of
+   the design. Stretching the final section instead keeps every page a
+   full-bleed field edge to edge, whatever its tone, without hardcoding a
+   background colour that would be wrong on three pages out of four. */
+main { display: flex; flex-direction: column; min-height: 100vh; }
+main > :last-child { flex: 1 0 auto; }
+
+/* Shared header for every routed page and landing section: marker above a
+   statement, with optional status/action on the right. */
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: clamp(18px, 3vw, 40px);
+  flex-wrap: wrap;
+  margin-bottom: clamp(32px, 5vw, 64px);
+}
+.page-head .marker { margin-bottom: 18px; display: inline-flex; }
+
+/* First-run / nothing-here states. Deliberately generous: an empty ledger
+   is the first thing a new person sees, so it has to teach rather than
+   just report emptiness. */
+.empty {
+  border: 2px solid currentColor;
+  padding: clamp(28px, 5vw, 56px);
+  max-width: 68ch;
+}
+.empty .body { max-width: 56ch; }
+
+/* The agent page's "running on X" header block. */
+.run-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(16px, 3vw, 32px);
+  flex-wrap: wrap;
+}
+.run-bar-name {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+/* Landing: the four-step explainer. */
+.steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: clamp(24px, 3.4vw, 46px);
+}
+.step { border-top: 2px solid currentColor; padding-top: 18px; }
+.step-n { display: block; opacity: 0.45; margin-bottom: 14px; }
+.step-head { font-size: clamp(1.1rem, 1.7vw, 1.4rem); margin-bottom: 10px; }
+.step-body { font-size: 0.92rem; opacity: 0.82; }
+
+.readout-stack { font-size: 1rem; font-family: var(--display); font-weight: 700; }
+
+/* Error toast — fixed, capped, internally scrollable. */
+.toast {
+  position: fixed;
+  left: var(--gutter);
+  bottom: var(--gutter);
+  z-index: 200;
+  max-width: min(460px, calc(100vw - var(--gutter) * 2));
+  max-height: min(70vh, 480px);
+  display: flex;
+  flex-direction: column;
+  background: var(--coral);
+  color: var(--ink);
+  border: 2px solid #fff;
+  overflow: hidden;
+}
+.toast-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  flex: none;
+  padding: 18px 20px;
+}
+.toast-x { background: none; border: 0; color: #fff; cursor: pointer; padding: 2px; flex: none; }
+.toast-body { margin: 0; padding: 0 20px 18px; overflow-y: auto; min-height: 0; white-space: pre-wrap; }
+
+/* Nav bell + unread badge. The wrapper carries the positioning context so
+   the badge can overhang the pill, which clips its own children. */
+.nav-bell-wrap { position: relative; display: inline-flex; flex: none; }
+.nav-bell-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  pointer-events: none;   /* the pill underneath owns the click */
+  z-index: 1;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--coral);
+  color: var(--ink);
+  border: 2px solid currentColor;
+  font-family: var(--data);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+}
+.nav[data-on='coral'] .nav-bell-count { background: var(--ink); color: var(--coral); }
+
+/* Notification feed. */
+.notif-list { list-style: none; display: flex; flex-direction: column; }
+.notif {
+  display: flex;
+  gap: clamp(14px, 2vw, 22px);
+  padding: clamp(18px, 2.4vw, 26px) 0;
+  border-top: 2px solid currentColor;
+  opacity: 0.62;                 /* read items recede */
+}
+.notif:last-child { border-bottom: 2px solid currentColor; }
+.notif.is-unread { opacity: 1; }
+.notif-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 2px solid currentColor; }
+.notif--payment .notif-icon { background: var(--mint); color: var(--ink); border-color: var(--mint); }
+.notif--failed .notif-icon,
+.notif--escalation .notif-icon { background: var(--coral); color: var(--ink); border-color: var(--coral); }
+.notif-main { min-width: 0; }
+.notif-title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.02rem;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.notif-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--coral); flex: none; }
+.notif-body { margin-top: 7px; opacity: 0.85; }
+.notif-meta { margin-top: 9px; opacity: 0.55; }
+
+/* ==========================================================================
    RESPONSIVE
    ========================================================================== */
 @media (max-width: 860px) {
@@ -1044,10 +1188,25 @@ textarea.inp { line-height: 1.6; resize: vertical; min-height: 150px; }
   .nav-links .pill { padding: 9px 15px; font-size: 0.68rem; }
   .readouts { grid-template-columns: repeat(2, 1fr); }
 }
-/* Below this the pills crowd the wordmark and wrap onto two lines; the hero
-   CTAs already reach every section, so the nav drops to the wordmark alone. */
+/* Below this the pills crowd the wordmark and would wrap onto two lines.
+   They used to be hidden outright — acceptable when they were scroll
+   anchors and the hero CTAs reached every section, but they're now the only
+   way to move between routes, so hiding them would strand a phone on
+   whatever page it landed on. Instead the row scrolls horizontally on its
+   own, and the wordmark drops its text to buy it the width. */
 @media (max-width: 680px) {
-  .nav-links { display: none; }
+  .nav { gap: 12px; }
+  .brand { font-size: 0; gap: 0; }           /* mark only; text is redundant here */
+  .brand-mark { font-size: 1rem; }
+  .nav-links {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    margin-right: calc(var(--gutter) * -1);
+    padding-right: var(--gutter);
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links .pill { flex: none; }
 }
 @media (max-width: 440px) {
   .readouts { grid-template-columns: 1fr; }

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { NavLink, Link } from 'react-router-dom';
+import { Bell } from 'lucide-react';
 
 const Mark: React.FC = () => (
   <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
@@ -11,12 +13,21 @@ const Mark: React.FC = () => (
   </svg>
 );
 
+const LINKS = [
+  { to: '/agent', label: 'Agent' },
+  { to: '/ledger', label: 'Ledger' },
+  { to: '/negotiations', label: 'Negotiations' },
+  { to: '/history', label: 'History' },
+];
+
 /**
  * Sticky nav that recolours itself from whichever field is currently behind
- * it, so it stays legible across the mint/ink/coral sections without
- * carrying its own background plate.
+ * it, so it stays legible across the mint/ink/coral pages without carrying
+ * its own background plate. The recolouring predates routing and still
+ * earns its keep: every page is built out of the same `[data-field]`
+ * sections, and the landing page stacks several of them in one scroll.
  */
-export const Nav: React.FC = () => {
+export const Nav: React.FC<{ unreadCount?: number }> = ({ unreadCount = 0 }) => {
   const [on, setOn] = useState<'mint' | 'ink' | 'coral'>('mint');
 
   useEffect(() => {
@@ -41,34 +52,48 @@ export const Nav: React.FC = () => {
     read();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
+    // Routing changes which field sits under the nav without any scroll
+    // event firing, so re-probe on the next frame after every navigation.
+    const settle = requestAnimationFrame(read);
     return () => {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(settle);
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
-  }, []);
-
-  const go = (id: string) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  });
 
   return (
     <nav className="nav" data-on={on}>
-      <a className="brand" href="#top" onClick={go('top')}>
+      <Link className="brand" to="/">
         <Mark />
         CollectAI
-      </a>
+      </Link>
       <div className="nav-links">
-        <a className="pill pill--sm" href="#agent" onClick={go('agent')}>
-          The agent
-        </a>
-        <a className="pill pill--sm" href="#ledger" onClick={go('ledger')}>
-          Ledger
-        </a>
-        <a className="pill pill--sm" href="#decision" onClick={go('decision')}>
-          Your call
-        </a>
+        {LINKS.map((l) => (
+          <NavLink
+            key={l.to}
+            to={l.to}
+            className={({ isActive }) => `pill pill--sm${isActive ? ' pill--solid' : ''}`}
+          >
+            {l.label}
+          </NavLink>
+        ))}
+        {/* The badge sits OUTSIDE the pill, not inside it: .pill clips its
+            own children (overflow:hidden, for the slide-up fill on hover),
+            which lopped the corner off a badge positioned within it. */}
+        <span className="nav-bell-wrap">
+          <NavLink
+            to="/notifications"
+            aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+            className={({ isActive }) => `pill pill--sm pill--icon${isActive ? ' pill--solid' : ''}`}
+          >
+            <Bell size={15} />
+          </NavLink>
+          {unreadCount > 0 && (
+            <span className="nav-bell-count" aria-hidden="true">{unreadCount > 9 ? '9+' : unreadCount}</span>
+          )}
+        </span>
       </div>
     </nav>
   );

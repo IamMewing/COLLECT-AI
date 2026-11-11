@@ -10,6 +10,7 @@ require('dotenv').config();
 const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText, handleVoiceTurn } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
+const notifications = require('./notifications');
 const { parseInvoiceCsv } = require('./csvImport');
 const auth = require('./auth');
 
@@ -100,39 +101,14 @@ function substitutePaymentLink(body, link) {
   return body.replace(/\n*\{\{PAYMENT_LINK\}\}\n*/g, '\n').trimEnd();
 }
 
-// ── Curated Sample Invoices for Testing Different Graph Paths ───────────────
-const SAMPLE_INVOICES = [
-  {
-    invoice_id: 'INV-1042',
-    client_name: 'Meridian Design Co.',
-    amount: 185000,
-    days_overdue: 34,
-    ignored_reminders: 2,
-    relationship_score: 62,
-    historical_on_time_rate: 0.55,
-    scenario: 'High Risk Escalation (Generates Firm Draft)',
-  },
-  {
-    invoice_id: 'INV-1043',
-    client_name: 'Acme Creative Studio',
-    amount: 42000,
-    days_overdue: 3,
-    ignored_reminders: 0,
-    relationship_score: 92,
-    historical_on_time_rate: 0.94,
-    scenario: 'Low Risk / High Probability (Plan Chooses No Action)',
-  },
-  {
-    invoice_id: 'INV-1044',
-    client_name: 'Apex Horizon Tech',
-    amount: 95000,
-    days_overdue: 12,
-    ignored_reminders: 1,
-    relationship_score: 78,
-    historical_on_time_rate: 0.72,
-    scenario: 'Moderate Risk (Generates Friendly Reminder Draft)',
-  },
-];
+// ── Invoices ────────────────────────────────────────────────────────────────
+// This service used to ship three hardcoded sample invoices (Meridian, Acme,
+// Apex) that were merged into every list response to exercise the graph's
+// three branches. They're gone deliberately: none of them carried a real
+// email or phone number, so the agent could reason about them but never
+// actually send anything — which made "it works" ambiguous in exactly the
+// place it most needed to be unambiguous. Every invoice here is now one a
+// person actually created, through the UI or a CSV import.
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -209,6 +185,44 @@ app.post('/api/agent/check-replies', auth.requireAuthOrSchedulerSecret, agentLim
     console.log(
       `\n📨 [POST /api/agent/check-replies] Checked inbox — ${result.checked} new repl${result.checked === 1 ? 'y' : 'ies'}.`
     );
+
+    // This usually runs unattended on a schedule, so the feed is the only
+    // place a person would ever learn a client wrote back — especially an
+    // escalation, which exists precisely because the agent decided it
+    // shouldn't handle something alone.
+    for (const r of result.results || []) {
+      if (r.status === 'escalate_to_human') {
+        await notifications.record({
+          kind: 'escalation',
+          title: 'The agent escalated a reply to you',
+          body: r.reason || 'It decided this one needs a human — a dispute, or something it shouldn’t answer on its own.',
+          invoice_id: r.invoice_id,
+        });
+      } else if (r.status === 'resolved') {
+        await notifications.record({
+          kind: 'reply',
+          title: 'A thread resolved itself',
+          body: 'The client agreed or confirmed payment, and the agent closed the conversation.',
+          invoice_id: r.invoice_id,
+        });
+      } else if (r.status === 'continue_negotiating') {
+        await notifications.record({
+          kind: 'reply',
+          title: 'A client replied',
+          body: 'The agent read it and wrote back — open negotiations to see the thread.',
+          invoice_id: r.invoice_id,
+        });
+      }
+    }
+    for (const b of result.billed_installments || []) {
+      await notifications.record({
+        kind: 'installment',
+        title: 'An installment came due and was billed',
+        body: 'A fresh PayPal link went out for the next installment on this plan.',
+        invoice_id: b.invoice_id || b?.invoice || undefined,
+      });
+    }
+
     res.json(result);
   } catch (error) {
     console.error('❌ [POST /api/agent/check-replies] Failed:', error);
@@ -241,7 +255,7 @@ app.get('/api/agent/invoices', async (req, res) => {
     const userInvoices = await store.loadUserInvoices();
     const statusMap = await store.loadInvoiceStatus();
     const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
-    res.json({ invoices: [...userInvoices, ...SAMPLE_INVOICES].map(withStatus) });
+    res.json({ invoices: userInvoices.map(withStatus) });
   } catch (error) {
     console.error('❌ [GET /api/agent/invoices] Failed:', error);
     res.status(500).json({ error: 'Failed to load invoices', details: error.message });
@@ -258,7 +272,7 @@ app.get('/api/agent/invoices', async (req, res) => {
 app.post('/api/agent/invoices/:id/mark-paid', async (req, res) => {
   try {
     const { id } = req.params;
-    const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
+    const allInvoices = await store.loadUserInvoices();
     if (!allInvoices.some((i) => i.invoice_id === id)) {
       return res.status(404).json({ error: 'Invoice not found', details: id });
     }
@@ -406,7 +420,18 @@ app.post('/api/agent/invoices/import', async (req, res) => {
  */
 app.post('/api/agent/sweep', agentLimiter, async (req, res) => {
   try {
-    const invoice = req.body?.invoice || SAMPLE_INVOICES[0];
+    // This used to fall back to a hardcoded sample invoice when the body
+    // carried none, which quietly turned a client-side bug (forgot to send
+    // the invoice) into a successful-looking run against someone else's
+    // data. With no samples left there's nothing to fall back to, and
+    // saying so plainly is better than inventing an invoice.
+    const invoice = req.body?.invoice;
+    if (!invoice || !invoice.client_name) {
+      return res.status(400).json({
+        error: 'No invoice to run on',
+        details: 'POST an { invoice } body. Add an invoice on the ledger first if you have none.',
+      });
+    }
     console.log(`\n🔍 [POST /api/agent/sweep] Running sweep for invoice ${invoice.invoice_id || 'unnamed'} (${invoice.client_name})`);
 
     const result = await runSweep(invoice);
@@ -461,7 +486,7 @@ app.post('/api/agent/sweep-all', agentLimiter, async (req, res) => {
   try {
     const statusMap = await store.loadInvoiceStatus();
     const withStatus = (inv) => ({ ...inv, ...normalizeStatusEntry(statusMap[inv.invoice_id]) });
-    const all = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES].map(withStatus);
+    const all = (await store.loadUserInvoices()).map(withStatus);
 
     const requestedIds = Array.isArray(req.body?.invoice_ids) ? new Set(req.body.invoice_ids) : null;
     const targets = all.filter((inv) => {
@@ -520,7 +545,7 @@ app.post('/api/agent/sweep-all', agentLimiter, async (req, res) => {
 app.post('/api/agent/approve', agentLimiter, async (req, res) => {
   try {
     const { draft, approved, edited_body, client_name } = req.body || {};
-    const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
+    const allInvoices = await store.loadUserInvoices();
     const invoice = req.body?.invoice || allInvoices.find(i => (req.body?.invoice_id && i.invoice_id === req.body.invoice_id) || (client_name && i.client_name === client_name));
 
     if (!draft) {
@@ -575,6 +600,43 @@ app.post('/api/agent/approve', agentLimiter, async (req, res) => {
     const finalDraft = { ...draft, body: finalBody };
 
     const result = await approveAndExecute(finalDraft, approved, null, client_name, invoice);
+
+    // Record what actually happened on the wire, not what was attempted —
+    // result.status now carries send_message()'s real outcome (see
+    // agent/execute.py), so a provider rejection lands in the feed as a
+    // failure with the provider's own reason attached.
+    if (approved) {
+      const send = result?.send_result || {};
+      const channel = String(send.channel_used || send.channel || finalDraft.channel || 'message');
+      const label = channel.charAt(0).toUpperCase() + channel.slice(1);
+      // Mock mode reports 'sent (mock)', real mode 'sent' or 'failed' — so
+      // match on the prefix rather than equality, or a mock run files every
+      // approval as a delivery failure.
+      const delivered = String(result?.status || '').startsWith('sent');
+
+      if (delivered && send.real_send) {
+        await notifications.record({
+          kind: 'sent',
+          title: `${label} sent to ${client_name || 'client'}`,
+          body: send.recipient ? `Delivered to ${send.recipient}.` : undefined,
+          invoice_id: invoice?.invoice_id,
+          client_name,
+        });
+      } else if (!delivered) {
+        await notifications.record({
+          kind: 'failed',
+          title: `Couldn’t send to ${client_name || 'client'}`,
+          body: send.error ? `${channel.toUpperCase()} rejected it: ${send.error}` : 'The send did not go through.',
+          invoice_id: invoice?.invoice_id,
+          client_name,
+        });
+      }
+      // Deliberately silent on the third case — delivered but real_send
+      // false, i.e. mock mode or no credentials configured. Nothing left
+      // the server, so it isn't an event; the approval gate already says
+      // "simulated only" right where the person clicked.
+    }
+
     res.json({ ...result, paypal_payment_link: paymentLink });
   } catch (error) {
     console.error('❌ [POST /api/agent/approve] Failed:', error);
@@ -689,18 +751,39 @@ app.post('/api/paypal/webhook', async (req, res) => {
       console.log(
         `🔁 [PayPal webhook] Installment ${mapping.installment_index} of ${mapping.invoice_id} captured — plan status: ${result.status}.`
       );
+      await notifications.record({
+        kind: 'installment',
+        title: `Installment ${mapping.installment_index} paid`,
+        body: `${mapping.client_name} paid an installment via PayPal. Plan status: ${result.status}.`,
+        invoice_id: mapping.invoice_id,
+        client_name: mapping.client_name,
+      });
       // Only the FINAL installment actually finishes the invoice.
       if (result.status === 'completed') {
         await store.markInvoicePaid(mapping.invoice_id, 'paypal');
         console.log(`✅ [PayPal webhook] All installments paid — invoice ${mapping.invoice_id} marked paid.`);
+        await notifications.record({
+          kind: 'payment',
+          title: 'Invoice paid in full',
+          body: `${mapping.client_name} finished their payment plan — every installment is settled.`,
+          invoice_id: mapping.invoice_id,
+          client_name: mapping.client_name,
+        });
       }
       return res.status(200).json({ received: true, mapped: true, captured: true, invoice_id: mapping.invoice_id, installment: mapping.installment_index, planStatus: result.status });
     }
 
     await store.markInvoicePaid(mapping.invoice_id, 'paypal');
     console.log(`✅ [PayPal webhook] Order ${ppOrderId} captured — invoice ${mapping.invoice_id} (${mapping.client_name}) marked paid automatically.`);
+    await notifications.record({
+      kind: 'payment',
+      title: 'Payment received',
+      body: `${mapping.client_name} paid invoice ${mapping.invoice_id} through the PayPal link the agent sent. Closed automatically — no one had to mark it.`,
+      invoice_id: mapping.invoice_id,
+      client_name: mapping.client_name,
+    });
 
-    const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
+    const allInvoices = await store.loadUserInvoices();
     const invoice = allInvoices.find((i) => i.invoice_id === mapping.invoice_id) || null;
 
     const closeLoopResult = await confirmPayment(mapping.client_name, invoice);
@@ -934,6 +1017,22 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const result = await handleIncomingText(fromPhone, body, 'whatsapp');
     console.log(`🔁 [WhatsApp webhook] Negotiation loop result for ${fromPhone}:`, result.status || result.reason || result);
 
+    // An inbound WhatsApp arrives with nobody watching the server log, so
+    // the feed is how a person finds out. 'skipped' means it matched no
+    // active conversation — noise, not news, so it isn't recorded.
+    if (result.status && result.status !== 'skipped') {
+      await notifications.record({
+        kind: result.status === 'escalate_to_human' ? 'escalation' : 'reply',
+        title: result.status === 'escalate_to_human'
+          ? 'A WhatsApp reply was escalated to you'
+          : 'A client replied on WhatsApp',
+        body: result.status === 'resolved'
+          ? 'The agent considers this thread resolved.'
+          : result.reason || 'Open negotiations to see the full thread.',
+        invoice_id: result.invoice_id,
+      });
+    }
+
     res.sendStatus(200);
   } catch (error) {
     console.error('❌ [WhatsApp webhook] Failed:', error);
@@ -944,11 +1043,11 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
   }
 });
 
-/** Looks up one invoice (user-created or curated sample) by id — same
- *  lookup every other per-invoice route in this file does inline; factored
- *  out once here since the three voice routes below all need it. */
+/** Looks up one invoice by id — same lookup every other per-invoice route
+ *  in this file does inline; factored out once here since the three voice
+ *  routes below all need it. */
 async function findInvoiceById(id) {
-  const allInvoices = [...(await store.loadUserInvoices()), ...SAMPLE_INVOICES];
+  const allInvoices = await store.loadUserInvoices();
   return allInvoices.find((i) => i.invoice_id === id) || null;
 }
 
@@ -1218,6 +1317,31 @@ app.get('/api/agent/negotiations', async (req, res) => {
       error: error.error || 'Failed to load negotiation state',
       details: error.details || error.message || 'Unknown error occurred',
     });
+  }
+});
+
+// ── Notifications ───────────────────────────────────────────────────────────
+// The feed behind the bell in the nav. Written to from the real events
+// elsewhere in this file (PayPal captures, sends succeeding/failing, replies
+// the agent handled); read from here.
+
+app.get('/api/notifications', auth.requireAuth, async (req, res) => {
+  try {
+    const list = await notifications.list(50);
+    res.json({ notifications: list, unread_count: list.filter((n) => !n.read).length });
+  } catch (error) {
+    console.error('❌ [GET /api/notifications] Failed:', error);
+    res.status(500).json({ error: 'Failed to load notifications', details: error.message });
+  }
+});
+
+app.post('/api/notifications/read', auth.requireAuth, async (req, res) => {
+  try {
+    await notifications.markAllRead();
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('❌ [POST /api/notifications/read] Failed:', error);
+    res.status(500).json({ error: 'Failed to mark notifications read', details: error.message });
   }
 });
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 const RUNS = [
   'Risk scored in parallel',
@@ -6,11 +7,6 @@ const RUNS = [
   'Real PayPal links',
   'Closes itself when paid',
 ];
-
-const go = (id: string) => (e: React.MouseEvent) => {
-  e.preventDefault();
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-};
 
 export const Hero: React.FC = () => (
   <section className="field field--mint hero" data-field="mint" id="top">
@@ -27,12 +23,12 @@ export const Hero: React.FC = () => (
           writes the message, and attaches a real PayPal link. You approve. It collects.
         </p>
         <div className="hero-cta">
-          <a className="pill pill--lg pill--solid" href="#ledger" onClick={go('ledger')}>
+          <Link className="pill pill--lg pill--solid" to="/ledger">
             Run the agent
-          </a>
-          <a className="pill pill--lg" href="#agent" onClick={go('agent')}>
+          </Link>
+          <Link className="pill pill--lg" to="/agent">
             See how it thinks
-          </a>
+          </Link>
         </div>
       </div>
     </div>

@@ -544,21 +544,29 @@ export const LiquidBlobs: React.FC<{ className?: string }> = ({ className }) => 
       /* The mass belongs to the cursor, so a still cursor has no mass: it
          retracts to nothing shortly after you stop and comes back the moment
          you move. Touch is the exception — there is no pointer there to answer
-         to, so rather than never appearing at all it drifts the hero. */
+         to, so rather than never appearing at all it drifts the hero.
+
+         "The hero" means literally that: the #top section Hero.tsx renders,
+         which only exists on the landing page. A null getElementById used to
+         fall through to top=0/hh=h, so the drift ran full-viewport-tall on
+         every OTHER route too — a solid disc left drifting over the ledger,
+         the agent page, history, wherever a touch user happened to be. It
+         retracts like the desktop pointer does on any page that isn't the
+         hero, and only drifts where there's a hero to drift across. */
       if (now - lastMove > 90) speed *= Math.pow(0.02, dt);
-      const idle = coarse ? false : !pointerSeen || now - lastMove > IDLE_AFTER;
+      const heroEl = coarse ? document.getElementById('top') : null;
+      const idle = coarse ? !heroEl : !pointerSeen || now - lastMove > IDLE_AFTER;
       // Asymmetric on purpose: appearing should feel instant, leaving should
       // still be a retraction rather than a cut.
       idleMix += ((idle ? 1 : 0) - idleMix) * Math.min(1, dt * (idle ? 11 : 20));
       quietMix += (quietTarget - quietMix) * Math.min(1, dt * 6.5);
 
-      if (coarse) {
+      if (coarse && heroEl) {
         // Penned to the hero: anchored mid-viewport it would sit on top of the
         // body copy of whatever section you scrolled to.
-        const hero = document.getElementById('top');
-        const r = hero?.getBoundingClientRect();
-        const top = r ? r.top : 0;
-        const hh = r ? r.height : h;
+        const r = heroEl.getBoundingClientRect();
+        const top = r.top;
+        const hh = r.height;
         idleAnchor.x = w * (0.5 + 0.26 * Math.sin(t * 0.31));
         idleAnchor.y = top + hh * (0.34 + 0.12 * Math.sin(t * 0.43 + 1.1));
         tx = idleAnchor.x + 46 * Math.sin(t * 0.37);

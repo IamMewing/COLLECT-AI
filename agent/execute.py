@@ -81,8 +81,13 @@ def send_message(
         SEND_REAL_EMAIL=true
         SMTP_HOST      (default: smtp.gmail.com)
         SMTP_PORT      (default: 587)
-        SMTP_USER      (the sending account, e.g. your Gmail address)
-        SMTP_PASS      (an App Password — NOT your regular account password)
+        SMTP_USER      (the SMTP login name — for Gmail this is your address;
+                        for a relay like Resend/SendGrid it's a fixed literal
+                        such as "resend", NOT an email address)
+        SMTP_PASS      (an App Password or API key — NOT your account password)
+        SMTP_FROM_EMAIL (optional, default: SMTP_USER — the actual From/
+                        envelope-sender address. Required whenever SMTP_USER
+                        isn't itself a valid email, e.g. Resend's "resend")
         DEMO_RECIPIENT_EMAIL  (fallback recipient when an invoice has no
                                email of its own — use your own inbox)
         SMTP_FROM_NAME (optional, default "CollectAI" — the display name on
@@ -123,6 +128,11 @@ def send_message(
     if real_send_requested and message.channel == "email":
         smtp_user = os.environ.get("SMTP_USER")
         smtp_pass = os.environ.get("SMTP_PASS")
+        # The login name and the From/envelope-sender address are different
+        # things for a relay like Resend (username is the literal "resend",
+        # which isn't a valid email) — SMTP_FROM_EMAIL lets them diverge.
+        # Falls back to smtp_user so a plain Gmail setup needs no change.
+        from_email = os.environ.get("SMTP_FROM_EMAIL", smtp_user)
         recipient = recipient_email or os.environ.get("DEMO_RECIPIENT_EMAIL")
 
         if not (smtp_user and smtp_pass and recipient):
@@ -144,19 +154,19 @@ def send_message(
                 # always have one, bare-address mail disproportionately
                 # doesn't. formataddr handles the quoting/escaping correctly
                 # rather than hand-building the header.
-                mime_msg["From"] = formataddr((os.environ.get("SMTP_FROM_NAME", "CollectAI"), smtp_user))
+                mime_msg["From"] = formataddr((os.environ.get("SMTP_FROM_NAME", "CollectAI"), from_email))
                 mime_msg["To"] = recipient
                 # Date/Message-ID aren't added automatically by MIMEText +
                 # smtplib the way a real MUA would set them — their absence
                 # is itself a signal some filters read as "auto-generated,"
                 # so they're set explicitly rather than left to chance.
                 mime_msg["Date"] = formatdate(localtime=True)
-                mime_msg["Message-ID"] = make_msgid(domain=smtp_user.split("@")[-1])
+                mime_msg["Message-ID"] = make_msgid(domain=from_email.split("@")[-1])
 
                 with smtplib.SMTP(host, port, timeout=15) as server:
                     server.starttls()
                     server.login(smtp_user, smtp_pass)
-                    server.sendmail(smtp_user, [recipient], mime_msg.as_string())
+                    server.sendmail(from_email, [recipient], mime_msg.as_string())
 
                 print(f"[SEND via email] Real email sent to {recipient}. Subject: {message.subject}", flush=True)
                 return {"status": "sent", "channel": message.channel, "real_send": True, "recipient": recipient}

@@ -8,8 +8,10 @@ graph's execution model when a plain function does the job clearly.
 """
 
 import os
+import re
 import smtplib
 from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate, make_msgid
 
@@ -63,6 +65,103 @@ def _tag_body(body: str, invoice_id: str | None) -> str:
     if tag in body:
         return body
     return f"{body}\n\n(Ref: {tag})"
+
+
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _render_email(body: str, invoice_id: str | None) -> tuple[str, str]:
+    """Turns the agent's plain-text draft into (plain_text, html) for a
+    real send.
+
+    Two things happen here, not one:
+
+    1. The draft model sometimes emits the literal two characters
+       backslash+n where it means a line break (an artifact of how the
+       LLM's own output gets threaded through JSON), which renders as a
+       visible "\\n\\n" in a plain-text mail client instead of a blank
+       line. Normalizing that is cheap insurance regardless of channel.
+    2. The body prose includes its own PayPal link inline ("...using
+       this link: https://..."). For the HTML part specifically, that
+       sentence is lifted out into a proper button — a wall of link text
+       buried mid-paragraph reads as spam-template, not as mail a person
+       wrote — while the plain-text part is left as plain prose (a
+       plain-text client has no button to offer anyway).
+    """
+    text = body.replace("\\n", "\n")
+
+    match = _URL_RE.search(text)
+    link = match.group(0).rstrip(").,;") if match else None
+
+    html_source = text
+    if link:
+        # Drop whichever clause introduced the raw link — it becomes the
+        # button below instead of also sitting inline in the prose.
+        html_source = re.sub(rf"[^.\n]*{re.escape(link)}[^.\n]*\.?", "", text)
+        html_source = re.sub(r"\n{3,}", "\n\n", html_source).strip()
+
+    paragraphs = [p.strip() for p in html_source.split("\n\n") if p.strip()]
+    paragraphs_html = "".join(
+        f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;'
+        f'color:#1a1a1a;font-family:Helvetica,Arial,sans-serif;">{p}</p>'
+        for p in paragraphs
+    )
+
+    button_html = ""
+    if link:
+        button_html = f"""
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 4px;">
+          <tr><td style="border-radius:4px;background:#CCFF00;">
+            <a href="{link}" style="display:inline-block;padding:14px 26px;
+              font-family:'Courier New',monospace;font-weight:700;font-size:13px;
+              letter-spacing:0.03em;color:#0A0A0A;text-decoration:none;">
+              PAY NOW VIA PAYPAL &rarr;
+            </a>
+          </td></tr>
+        </table>"""
+
+    chip_html = (
+        f'<span style="display:inline-block;padding:4px 10px;background:#0A0A0A;'
+        f'color:#CCFF00;font-family:\'Courier New\',monospace;font-size:12px;'
+        f'letter-spacing:0.05em;border-radius:3px;">{invoice_id}</span><div style="height:18px;"></div>'
+        if invoice_id else ""
+    )
+
+    html = f"""\
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background:#F4F4EF;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F4EF;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:6px;overflow:hidden;border:1px solid #e8e8e3;">
+            <tr>
+              <td style="background:#1B00FF;padding:22px 32px;">
+                <span style="font-family:'Courier New',monospace;font-weight:800;font-size:17px;
+                  letter-spacing:-0.02em;color:#CCFF00;">&#9679; CollectAI</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px;">
+                {chip_html}
+                {paragraphs_html}
+                {button_html}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 32px;background:#fafaf8;border-top:1px solid #eee;">
+                <p style="margin:0;font-family:'Courier New',monospace;font-size:11px;color:#999;">
+                  Sent by CollectAI — an autonomous invoice-collections agent.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"""
+    return text, html
 
 
 def send_message(
@@ -146,7 +245,13 @@ def send_message(
                 host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
                 port = int(os.environ.get("SMTP_PORT", "587"))
 
-                mime_msg = MIMEText(message.body)
+                plain_text, html_body = _render_email(message.body, invoice_id)
+                mime_msg = MIMEMultipart("alternative")
+                # Plain text first, then HTML — per RFC 2046 the LAST
+                # alternative is the one a client prefers, so HTML (the
+                # one with the real design) has to come second.
+                mime_msg.attach(MIMEText(plain_text, "plain"))
+                mime_msg.attach(MIMEText(html_body, "html"))
                 mime_msg["Subject"] = _tag_subject(message.subject, invoice_id)
                 # A display name on From ("CollectAI <you@gmail.com>" rather
                 # than the bare address) is one of the cheap, well-documented

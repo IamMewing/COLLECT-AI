@@ -34,6 +34,7 @@ def predict_payment_probability(
     explanation = (
         f"Base rate from this client's history: {base:.0f}%. "
         f"Reduced by {penalty:.0f} points for {days_overdue} days overdue, "
-        f"{ignored_reminders} ignored reminders, and a relationship score of {relationship_score}."
+        f"{ignored_reminders} ignored reminder{'s' if ignored_reminders != 1 else ''}, "
+        f"and a relationship score of {relationship_score}."
     )
     return {"probability": probability, "explanation": explanation}

@@ -41,22 +41,22 @@ const STEPS = [
   {
     n: '01',
     head: 'It scores the money and the odds',
-    body: 'Risk and payment probability are computed in parallel — amount, days overdue, ignored reminders, relationship history, on-time rate. Two independent reads before anything is decided.',
+    body: 'Risk and the odds of getting paid are worked out side by side — amount, days overdue, reminders ignored, relationship history, how reliably they’ve paid before. Two separate reads, before anything gets decided.',
   },
   {
     n: '02',
     head: 'It decides whether chasing is worth it',
-    body: 'A high-probability account gets left alone. The graph genuinely stops — no message is drafted at all. Chasing someone who was always going to pay costs goodwill and buys nothing.',
+    body: 'An account that looks likely to pay on its own gets left alone, full stop — no message even gets drafted. Chasing someone who was already going to pay just spends goodwill for nothing.',
   },
   {
     n: '03',
     head: 'It writes the message, with a real payment link',
-    body: 'Tone matched to the relationship, channel matched to what’s actually on file. A real PayPal order is minted and the live approval link is woven into the text — not a promise of one.',
+    body: 'Tone matched to the relationship, channel matched to whatever contact info is actually on file. It creates a real PayPal order and puts the live payment link right in the message — the actual thing, not a promise of one.',
   },
   {
     n: '04',
     head: 'It reads the reply and keeps going',
-    body: 'An answer comes back, the agent negotiates: a settlement, an installment plan it then bills on schedule, or an escalation to you. Paid closes the loop automatically via webhook.',
+    body: 'When a reply comes in, the agent negotiates — a settlement, an installment plan it bills automatically as each part comes due, or it hands the thread to you if things get complicated. Once it’s paid, PayPal tells the agent directly and the invoice closes itself.',
   },
 ];
 

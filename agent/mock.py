@@ -62,7 +62,13 @@ def mock_run_sweep(invoice: dict) -> dict:
     risk = RiskAssessment(
         score=risk_raw["score"],
         category=risk_raw["category"],
-        reasoning=f"[MOCK] Deterministic score from calculate_risk_score: {risk_raw}",
+        reasoning=(
+            f"[MOCK] Score {risk_raw['score']}/100 ({risk_raw['category']}) — "
+            f"{invoice['days_overdue']} days overdue, ₹{invoice['amount']:,.0f} at stake, "
+            f"{invoice['ignored_reminders']} ignored reminder"
+            f"{'s' if invoice['ignored_reminders'] != 1 else ''}, "
+            f"relationship score {relationship_score}/100."
+        ),
     )
 
     prob_raw = predict_payment_probability(
@@ -94,57 +100,67 @@ def mock_run_sweep(invoice: dict) -> dict:
             branch="no_action",
             channel="none",
             tone="none",
-            reasoning="[MOCK] Probability >= 85, invoice likely resolves itself.",
+            reasoning=f"[MOCK] {probability.probability}% likely to pay without a nudge — leaving this one alone.",
         )
     elif risk.category in ("Low", "Medium") and probability.probability >= 50:
         plan = ActionPlan(
             branch="standard",
             channel=standard_channel,
             tone="friendly",
-            reasoning=f"[MOCK] Low/Medium risk with reasonable payment probability. "
-                      f"Channel={standard_channel} (email on file: {has_email}, phone on file: {has_phone}).",
+            reasoning=(
+                f"[MOCK] {risk.category} risk, {probability.probability}% likely to pay on its own — "
+                f"a friendly nudge over {standard_channel} should do it."
+            ),
         )
     else:
         plan = ActionPlan(
             branch="escalation",
             channel=escalation_channel,
             tone="firm",
-            reasoning=f"[MOCK] High/Critical risk or low payment probability. "
-                      f"Channel={escalation_channel} (email on file: {has_email}, phone on file: {has_phone}).",
+            reasoning=(
+                f"[MOCK] {risk.category} risk and only {probability.probability}% likely to pay without "
+                f"a push — this needs a firmer nudge over {escalation_channel}."
+            ),
         )
 
     draft = None
     if plan.branch != "no_action":
         client = invoice.get("client_name", "there")
         channel = plan.channel if plan.channel in ("email", "whatsapp", "sms") else "email"
+        # These two dicts deliberately echo the phrasing the real draft agent
+        # (agent/agents.py's build_draft_agent) is told to reach for — "this
+        # is now significantly overdue" over anything that reads like a
+        # threat — so a demo run doesn't sound noticeably stiffer just
+        # because USE_MOCK happened to be on.
         tone_opener = {
             "friendly": f"Hope you're doing well, {client}!",
             "firm": f"Hi {client}, following up on an overdue balance.",
-            "urgent": f"Hi {client} — this needs prompt attention.",
+            "urgent": f"Hi {client} — this one's now significantly overdue.",
         }.get(plan.tone, f"Hi {client},")
         closer = {
             "friendly": "No rush if it's already on its way — just flagging it.",
-            "firm": "Could you confirm when this will be settled?",
-            "urgent": "Please treat this as time-sensitive and confirm today.",
+            "firm": "Could you let me know when this'll be settled?",
+            "urgent": "I'd like to get this resolved this week — can you confirm?",
         }.get(plan.tone, "Let me know where this stands.")
 
         if channel == "sms":
             # Mirrors the real draft agent's sms rule: terse, no sign-off,
             # link inline rather than on its own block of lines.
             body = (
-                f"Invoice {invoice.get('invoice_id', 'N/A')} for INR {invoice['amount']:,.0f} "
-                f"is {invoice['days_overdue']} days past due. {closer} Pay here: {{{{PAYMENT_LINK}}}}"
+                f"Invoice {invoice.get('invoice_id', 'N/A')} for INR {invoice['amount']:,.0f}, "
+                f"{invoice['days_overdue']} days overdue now. {closer} Pay here: {{{{PAYMENT_LINK}}}}"
             )
         else:
             body = (
                 f"{tone_opener}\n\n"
                 f"Invoice {invoice.get('invoice_id', 'N/A')} for INR "
-                f"{invoice['amount']:,.0f} is {invoice['days_overdue']} days past due. "
+                f"{invoice['amount']:,.0f} is {invoice['days_overdue']} days overdue now. "
                 f"{closer}\n\n"
-                f"You can settle it here:\n"
+                f"You can pay it here:\n"
                 f"{{{{PAYMENT_LINK}}}}\n\n"
-                f"(Offline mode: this draft is templated rather than model-written. "
-                f"Set USE_MOCK=false to have the agent write it.)"
+                f"(This one's a template, not something the model wrote — offline mode "
+                f"skips the real draft agent. Set USE_MOCK=false to have it write this "
+                f"itself.)"
             )
 
         draft = DraftedMessage(

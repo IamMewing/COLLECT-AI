@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 const RUNS = [
-  'Risk scored in parallel',
+  'Weighs the risk and the odds',
   'Chases only when it pays',
   'Real PayPal links',
   'Closes itself when paid',

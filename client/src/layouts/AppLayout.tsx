@@ -22,6 +22,7 @@ export const AppLayout: React.FC = () => {
   const {
     sweepResult, approveResult, isSweeping, isApproving, error, setError,
     showAddInvoice, setShowAddInvoice, handleInvoiceCreated,
+    editingInvoice, setEditingInvoice, handleInvoiceUpdated,
   } = useAppState();
   const { unreadCount } = useNotifications();
   const { pathname } = useLocation();
@@ -69,6 +70,14 @@ export const AppLayout: React.FC = () => {
 
       {showAddInvoice && (
         <AddInvoiceForm onClose={() => setShowAddInvoice(false)} onCreated={handleInvoiceCreated} />
+      )}
+
+      {editingInvoice && (
+        <AddInvoiceForm
+          invoice={editingInvoice}
+          onClose={() => setEditingInvoice(null)}
+          onCreated={handleInvoiceUpdated}
+        />
       )}
     </>
   );

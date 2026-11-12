@@ -11,6 +11,7 @@ import {
   type ICellRendererParams,
 } from 'ag-grid-community';
 import type { Invoice } from '../types';
+import { Pencil, Trash2 } from 'lucide-react';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -53,16 +54,57 @@ const StatusCell: React.FC<ICellRendererParams<Invoice>> = ({ data }) => {
   return <span className="tag" style={{ opacity: 0.75 }}>Chasing</span>;
 };
 
+interface ActionsCellProps extends ICellRendererParams<Invoice> {
+  onEdit: (inv: Invoice) => void;
+  onDelete: (inv: Invoice) => void;
+}
+
+/** Edit/delete icons for a row. Stops propagation so clicking either one
+ *  doesn't also fire the grid's row-click (which selects the invoice). */
+const ActionsCell: React.FC<ActionsCellProps> = ({ data, onEdit, onDelete }) => {
+  if (!data) return null;
+  return (
+    <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="pill pill--icon"
+        title={`Edit ${data.invoice_id}`}
+        aria-label={`Edit ${data.invoice_id}`}
+        onClick={() => onEdit(data)}
+      >
+        <Pencil size={13} />
+      </button>
+      <button
+        type="button"
+        className="pill pill--icon"
+        title={`Delete ${data.invoice_id}`}
+        aria-label={`Delete ${data.invoice_id}`}
+        onClick={() => {
+          if (window.confirm(`Delete invoice ${data.invoice_id} for ${data.client_name}? This can't be undone.`)) {
+            onDelete(data);
+          }
+        }}
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+};
+
 interface InvoiceGridProps {
   invoices: Invoice[];
   selectedInvoiceId?: string | null;
   onSelectInvoice: (inv: Invoice) => void;
+  onEditInvoice: (inv: Invoice) => void;
+  onDeleteInvoice: (inv: Invoice) => void;
 }
 
 export const InvoiceGrid: React.FC<InvoiceGridProps> = ({
   invoices,
   selectedInvoiceId,
   onSelectInvoice,
+  onEditInvoice,
+  onDeleteInvoice,
 }) => {
   const gridApiRef = useRef<GridApi<Invoice> | null>(null);
 
@@ -105,8 +147,16 @@ export const InvoiceGrid: React.FC<InvoiceGridProps> = ({
         valueFormatter: (p) => (typeof p.value === 'number' ? `${Math.round(p.value * 100)}%` : ''),
       },
       { headerName: 'Status', width: 168, cellRenderer: StatusCell, sortable: false, filter: false },
+      {
+        headerName: 'Actions',
+        width: 104,
+        sortable: false,
+        filter: false,
+        cellRenderer: ActionsCell,
+        cellRendererParams: { onEdit: onEditInvoice, onDelete: onDeleteInvoice },
+      },
     ],
-    []
+    [onEditInvoice, onDeleteInvoice]
   );
 
   // Sorting earns its place on a receivables list; per-column filter menus just

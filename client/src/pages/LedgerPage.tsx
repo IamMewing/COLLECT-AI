@@ -10,9 +10,10 @@ import { Plus } from 'lucide-react';
 
 export const LedgerPage: React.FC = () => {
   const {
-    invoices, selectedInvoice, isSweeping, isMarkingPaid, isCalling, callNote,
+    invoices, selectedInvoice, isSweeping, isMarkingPaid,
     paypalConfigured, loadInvoices, selectInvoice, handleRunSweep,
-    handleMarkPaid, handleCallThem, handleOpenPortfolioResult, setShowAddInvoice,
+    handleMarkPaid, handleDeleteInvoice, handleOpenPortfolioResult,
+    setShowAddInvoice, setEditingInvoice,
   } = useAppState();
 
   const empty = invoices.length === 0;
@@ -53,6 +54,8 @@ export const LedgerPage: React.FC = () => {
             invoices={invoices}
             selectedInvoiceId={selectedInvoice?.invoice_id}
             onSelectInvoice={selectInvoice}
+            onEditInvoice={setEditingInvoice}
+            onDeleteInvoice={handleDeleteInvoice}
           />
           <div id="selector" style={{ marginTop: 'clamp(26px, 3.5vw, 46px)' }}>
             <InvoiceSelector
@@ -62,13 +65,8 @@ export const LedgerPage: React.FC = () => {
               onAddInvoice={() => setShowAddInvoice(true)}
               onMarkPaid={handleMarkPaid}
               isMarkingPaid={isMarkingPaid}
-              onCallThem={handleCallThem}
-              isCalling={isCalling}
               onInvoicesImported={loadInvoices}
             />
-            {callNote && (
-              <p className="body body--sm" style={{ opacity: 0.75, marginTop: 14 }}>{callNote}</p>
-            )}
           </div>
           <PortfolioSweep invoices={invoices} onOpen={handleOpenPortfolioResult} />
         </>

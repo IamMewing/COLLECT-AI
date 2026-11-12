@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Invoice } from '../types';
-import { Check, Phone, Plus, Zap } from 'lucide-react';
+import { Check, Plus, Zap } from 'lucide-react';
 import { ImportCsvButton } from './ImportCsvButton';
 
 /**
@@ -22,10 +22,6 @@ interface InvoiceSelectorProps {
   onAddInvoice?: () => void;
   onMarkPaid?: (inv: Invoice) => void;
   isMarkingPaid?: boolean;
-  /** Places a real outbound AI voice call (Phase 5). Omitted entirely hides
-   *  the button; shown only when the selected invoice has a phone on file. */
-  onCallThem?: (inv: Invoice) => void;
-  isCalling?: boolean;
   /** Called after a CSV import saves at least one row, so the parent can
    *  refetch the ledger. Omitted entirely hides the Import CSV button. */
   onInvoicesImported?: () => void;
@@ -34,7 +30,7 @@ interface InvoiceSelectorProps {
 
 export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
   selectedInvoice, onRunSweep,
-  isSweeping, onAddInvoice, onMarkPaid, isMarkingPaid, onCallThem, isCalling, onInvoicesImported,
+  isSweeping, onAddInvoice, onMarkPaid, isMarkingPaid, onInvoicesImported,
 }) => {
   if (!selectedInvoice) return null;
   const inv = selectedInvoice;
@@ -92,18 +88,6 @@ export const InvoiceSelector: React.FC<InvoiceSelectorProps> = ({
             >
               {isMarkingPaid ? <span className="spin" /> : <Check size={15} />}
               Mark paid
-            </button>
-          )}
-          {onCallThem && !!inv.phone && !paid && (
-            <button
-              type="button"
-              className="pill"
-              onClick={() => onCallThem(inv)}
-              disabled={isCalling}
-              title="Places a real outbound call — the agent introduces itself and negotiates live"
-            >
-              {isCalling ? <span className="spin" /> : <Phone size={15} />}
-              Call them
             </button>
           )}
           <button

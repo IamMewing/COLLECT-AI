@@ -351,6 +351,76 @@ app.post('/api/agent/invoices', async (req, res) => {
 });
 
 /**
+ * PATCH /api/agent/invoices/:id
+ * Edits an existing invoice in place. Same validation as creating one;
+ * every field is optional here (only what's sent gets changed). Sending
+ * email: "" or phone: "" clears that field — both are falsy downstream, the
+ * same as never having been set, so this is how you switch an invoice from
+ * WhatsApp/SMS outreach back to email (or vice versa).
+ */
+app.patch('/api/agent/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userInvoices = await store.loadUserInvoices();
+    const existing = userInvoices.find((i) => i.invoice_id === id);
+    if (!existing) return res.status(404).json({ error: 'Invoice not found', details: id });
+
+    const b = req.body || {};
+    if (b.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.email).trim())) {
+      return res.status(400).json({
+        error: 'Invalid email',
+        details: `"${b.email}" doesn't look like a valid email address.`,
+      });
+    }
+    if (b.phone && !/^\+?[0-9\s().-]{7,20}$/.test(String(b.phone).trim())) {
+      return res.status(400).json({
+        error: 'Invalid phone',
+        details: `"${b.phone}" doesn't look like a valid phone number.`,
+      });
+    }
+
+    const updates = {};
+    if (b.client_name != null) updates.client_name = String(b.client_name);
+    if (b.amount != null) updates.amount = Number(b.amount);
+    if (b.days_overdue != null) updates.days_overdue = Number(b.days_overdue);
+    if (b.ignored_reminders != null) updates.ignored_reminders = Number(b.ignored_reminders);
+    if (b.relationship_score != null) updates.relationship_score = Number(b.relationship_score);
+    if (b.historical_on_time_rate != null) updates.historical_on_time_rate = Number(b.historical_on_time_rate);
+    if (b.email != null) updates.email = String(b.email).trim();
+    if (b.phone != null) updates.phone = String(b.phone).trim();
+
+    const ok = await store.updateInvoice(id, updates);
+    if (!ok) return res.status(404).json({ error: 'Invoice not found', details: id });
+
+    const updatedInvoice = { ...existing, ...updates };
+    console.log(`\n✏️  [PATCH /api/agent/invoices/${id}] Updated.`);
+    res.json({ invoice: updatedInvoice });
+  } catch (error) {
+    console.error('❌ [PATCH /api/agent/invoices/:id] Failed:', error);
+    res.status(500).json({ error: 'Failed to update invoice', details: error.message });
+  }
+});
+
+/**
+ * DELETE /api/agent/invoices/:id
+ * Permanently removes an invoice (and its tracked paid/active status) from
+ * the ledger. Does not touch the message-history or PayPal-order audit
+ * trail for it — those record what actually happened and should survive.
+ */
+app.delete('/api/agent/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const ok = await store.deleteInvoice(id);
+    if (!ok) return res.status(404).json({ error: 'Invoice not found', details: id });
+    console.log(`\n🗑️  [DELETE /api/agent/invoices/${id}] Deleted.`);
+    res.json({ invoice_id: id, status: 'deleted' });
+  } catch (error) {
+    console.error('❌ [DELETE /api/agent/invoices/:id] Failed:', error);
+    res.status(500).json({ error: 'Failed to delete invoice', details: error.message });
+  }
+});
+
+/**
  * POST /api/agent/invoices/import
  * Bulk-creates invoices from CSV text (body: { csv: string }). Partial
  * success is the expected outcome, not an error case — a 200-row import

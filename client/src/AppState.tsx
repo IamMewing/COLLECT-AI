@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Invoice, SweepResult, ApproveResult, DraftedMessage, ApiError, PortfolioOutcome } from './types';
-import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, triggerVoiceCall, checkPaypalStatus } from './api';
+import { fetchInvoices, runSweep, approveAndExecute, markInvoicePaid, deleteInvoice as deleteInvoiceApi, checkPaypalStatus } from './api';
 
 /**
  * Shared application state, lifted above the router.
@@ -22,15 +22,16 @@ interface AppStateValue {
   isSweeping: boolean;
   isApproving: boolean;
   isMarkingPaid: boolean;
-  isCalling: boolean;
-  callNote: string | null;
+  isDeleting: boolean;
   error: ApiError | null;
   paypalConfigured: boolean;
   historyRefreshKey: number;
   showAddInvoice: boolean;
+  editingInvoice: Invoice | null;
 
   setError: (e: ApiError | null) => void;
   setShowAddInvoice: (show: boolean) => void;
+  setEditingInvoice: (invoice: Invoice | null) => void;
   loadInvoices: () => Promise<void>;
   selectInvoice: (inv: Invoice) => void;
   handleRunSweep: (inv: Invoice) => Promise<void>;
@@ -38,8 +39,9 @@ interface AppStateValue {
   handleReject: (draft: DraftedMessage) => Promise<void>;
   handleReset: () => void;
   handleInvoiceCreated: (invoice: Invoice) => Promise<void>;
+  handleInvoiceUpdated: (invoice: Invoice) => Promise<void>;
   handleMarkPaid: (invoice: Invoice) => Promise<void>;
-  handleCallThem: (invoice: Invoice) => Promise<void>;
+  handleDeleteInvoice: (invoice: Invoice) => Promise<void>;
   handleOpenPortfolioResult: (invoice: Invoice, outcome: PortfolioOutcome) => void;
 }
 
@@ -61,12 +63,12 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isSweeping, setIsSweeping] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
-  const [isCalling, setIsCalling] = useState(false);
-  const [callNote, setCallNote] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [paypalConfigured, setPaypalConfigured] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [showAddInvoice, setShowAddInvoice] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
 
   useEffect(() => {
     checkPaypalStatus()
@@ -190,6 +192,12 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     selectInvoice(invoice);
   }, [loadInvoices, selectInvoice]);
 
+  const handleInvoiceUpdated = useCallback(async (invoice: Invoice) => {
+    setEditingInvoice(null);
+    await loadInvoices();
+    selectInvoice(invoice);
+  }, [loadInvoices, selectInvoice]);
+
   const handleMarkPaid = useCallback(async (invoice: Invoice) => {
     setIsMarkingPaid(true);
     try {
@@ -203,23 +211,27 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [loadInvoices]);
 
-  const handleCallThem = useCallback(async (invoice: Invoice) => {
-    setIsCalling(true);
-    setCallNote(null);
+  const handleDeleteInvoice = useCallback(async (invoice: Invoice) => {
+    setIsDeleting(true);
+    setError(null);
     try {
-      const result = await triggerVoiceCall(invoice.invoice_id);
-      setCallNote(
-        result.real_call
-          ? `Calling ${invoice.client_name} now at ${result.recipient} — watch the negotiations page as it happens.`
-          : 'Twilio voice calling is not configured yet, so this was a stub — no real call was placed.'
-      );
-      setHistoryRefreshKey((k) => k + 1);
+      await deleteInvoiceApi(invoice.invoice_id);
+      setSelectedInvoice((cur) => (cur?.invoice_id === invoice.invoice_id ? null : cur));
+      setSweepResult(null);
+      setApproveResult(null);
+      await loadInvoices();
     } catch (err: any) {
-      setCallNote(err?.details || err?.error || 'Could not place the call.');
+      console.error('Failed to delete invoice:', err);
+      setError({
+        error: err.error || 'Could not delete that invoice',
+        details: err.details || err.message,
+        stderr: err.stderr || null,
+        status: err.status,
+      });
     } finally {
-      setIsCalling(false);
+      setIsDeleting(false);
     }
-  }, []);
+  }, [loadInvoices]);
 
   /** "Open" on a portfolio-sweep row. A succeeded row already has the full
    *  SweepResult from the batch call — reuse it and go straight to the agent
@@ -245,11 +257,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const value: AppStateValue = {
     invoices, selectedInvoice, sweepResult, approveResult,
-    isSweeping, isApproving, isMarkingPaid, isCalling, callNote,
-    error, paypalConfigured, historyRefreshKey, showAddInvoice,
-    setError, setShowAddInvoice, loadInvoices, selectInvoice,
+    isSweeping, isApproving, isMarkingPaid, isDeleting,
+    error, paypalConfigured, historyRefreshKey, showAddInvoice, editingInvoice,
+    setError, setShowAddInvoice, setEditingInvoice, loadInvoices, selectInvoice,
     handleRunSweep, handleApprove, handleReject, handleReset,
-    handleInvoiceCreated, handleMarkPaid, handleCallThem,
+    handleInvoiceCreated, handleInvoiceUpdated, handleMarkPaid, handleDeleteInvoice,
     handleOpenPortfolioResult,
   };
 

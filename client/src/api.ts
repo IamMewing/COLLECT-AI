@@ -51,6 +51,40 @@ export async function createInvoice(payload: {
   return data.invoice;
 }
 
+/** Edits an existing invoice in place. Only send the fields that changed —
+ *  anything omitted is left as-is server-side. Pass email: '' or phone: ''
+ *  to clear that field (e.g. to switch an invoice's channel). */
+export async function updateInvoice(
+  invoiceId: string,
+  payload: Partial<{
+    client_name: string;
+    amount: number;
+    days_overdue: number;
+    ignored_reminders: number;
+    relationship_score: number;
+    historical_on_time_rate: number;
+    email: string;
+    phone: string;
+  }>
+): Promise<Invoice> {
+  const res = await apiFetch(`/agent/invoices/${encodeURIComponent(invoiceId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await handleResponse<{ invoice: Invoice }>(res);
+  return data.invoice;
+}
+
+/** Permanently removes an invoice from the ledger. Does not touch its
+ *  message-history or PayPal-order audit trail. */
+export async function deleteInvoice(invoiceId: string): Promise<{ invoice_id: string; status: 'deleted' }> {
+  const res = await apiFetch(`/agent/invoices/${encodeURIComponent(invoiceId)}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res);
+}
+
 export interface ImportInvoicesResult {
   created: Invoice[];
   created_count: number;

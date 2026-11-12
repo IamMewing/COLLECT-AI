@@ -116,6 +116,61 @@ async function saveNewInvoice(invoice) {
   writeJson(USER_INVOICES_PATH, list);
 }
 
+/** Merges `updates` into an existing invoice's record (edit). Returns true
+ *  if a matching invoice was found and updated, false if no such invoice_id
+ *  exists. Firestore: a partial `.set(..., {merge:true})` so fields not
+ *  included in `updates` are left untouched; an empty string for email/phone
+ *  is a deliberate "clear this field" value (falsy downstream, same as
+ *  never having been set), not something that needs a real field delete. */
+async function updateInvoice(invoiceId, updates) {
+  if (firestoreDb) {
+    try {
+      const ref = firestoreDb.collection('user_invoices').doc(invoiceId);
+      const doc = await ref.get();
+      if (!doc.exists) return false;
+      await ref.set(updates, { merge: true });
+      return true;
+    } catch (e) {
+      disableFirestore(e);
+    }
+  }
+  const list = readJson(USER_INVOICES_PATH, []);
+  const idx = list.findIndex((i) => i.invoice_id === invoiceId);
+  if (idx === -1) return false;
+  list[idx] = { ...list[idx], ...updates };
+  writeJson(USER_INVOICES_PATH, list);
+  return true;
+}
+
+/** Deletes an invoice and its tracked status entry (if any). Returns true if
+ *  a matching invoice was found and removed, false otherwise. Doesn't touch
+ *  paypal_orders or message_history — those are an audit trail of what
+ *  actually happened and should survive the invoice record being deleted. */
+async function deleteInvoice(invoiceId) {
+  if (firestoreDb) {
+    try {
+      const ref = firestoreDb.collection('user_invoices').doc(invoiceId);
+      const doc = await ref.get();
+      if (!doc.exists) return false;
+      await ref.delete();
+      await firestoreDb.collection('invoice_status').doc(invoiceId).delete().catch(() => {});
+      return true;
+    } catch (e) {
+      disableFirestore(e);
+    }
+  }
+  const list = readJson(USER_INVOICES_PATH, []);
+  const next = list.filter((i) => i.invoice_id !== invoiceId);
+  if (next.length === list.length) return false;
+  writeJson(USER_INVOICES_PATH, next);
+  const statusMap = readJson(INVOICE_STATUS_PATH, {});
+  if (statusMap[invoiceId]) {
+    delete statusMap[invoiceId];
+    writeJson(INVOICE_STATUS_PATH, statusMap);
+  }
+  return true;
+}
+
 // ── Invoice status (paid/active), tracked separately by invoice_id so it
 // applies uniformly to both curated SAMPLE_INVOICES and user-created ones ──
 
@@ -207,6 +262,8 @@ module.exports = {
   get firestoreEnabled() { return Boolean(firestoreDb); },
   loadUserInvoices,
   saveNewInvoice,
+  updateInvoice,
+  deleteInvoice,
   loadInvoiceStatus,
   markInvoicePaid,
   getPaypalOrderMapping,

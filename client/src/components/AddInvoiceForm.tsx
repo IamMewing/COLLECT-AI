@@ -1,22 +1,28 @@
 import React, { useState } from 'react';
 import type { Invoice } from '../types';
-import { createInvoice } from '../api';
+import { createInvoice, updateInvoice } from '../api';
 import { X } from 'lucide-react';
 
 interface AddInvoiceFormProps {
   onClose: () => void;
   onCreated: (invoice: Invoice) => void;
+  /** When set, the form edits this invoice in place (PATCH) instead of
+   *  creating a new one — same fields, prefilled from its current values. */
+  invoice?: Invoice;
 }
 
-export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreated }) => {
-  const [clientName, setClientName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [amount, setAmount] = useState('');
-  const [daysOverdue, setDaysOverdue] = useState('0');
-  const [ignoredReminders, setIgnoredReminders] = useState('0');
-  const [standing, setStanding] = useState('75');
-  const [onTimeRate, setOnTimeRate] = useState('80');
+export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreated, invoice }) => {
+  const isEditing = !!invoice;
+  const [clientName, setClientName] = useState(invoice?.client_name ?? '');
+  const [email, setEmail] = useState(invoice?.email ?? '');
+  const [phone, setPhone] = useState(invoice?.phone ?? '');
+  const [amount, setAmount] = useState(invoice ? String(invoice.amount) : '');
+  const [daysOverdue, setDaysOverdue] = useState(invoice ? String(invoice.days_overdue) : '0');
+  const [ignoredReminders, setIgnoredReminders] = useState(invoice ? String(invoice.ignored_reminders) : '0');
+  const [standing, setStanding] = useState(invoice ? String(invoice.relationship_score) : '75');
+  const [onTimeRate, setOnTimeRate] = useState(
+    invoice ? String(Math.round(invoice.historical_on_time_rate * 100)) : '80'
+  );
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -37,17 +43,24 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
     setSubmitting(true);
     setFormError(null);
     try {
-      const invoice = await createInvoice({
+      const shared = {
         client_name: clientName.trim(),
         amount: Number(amount),
         days_overdue: Number(daysOverdue) || 0,
         ignored_reminders: Number(ignoredReminders) || 0,
         relationship_score: Math.min(100, Math.max(0, Number(standing) || 75)),
         historical_on_time_rate: Math.min(100, Math.max(0, Number(onTimeRate) || 80)) / 100,
-        ...(email.trim() ? { email: email.trim() } : {}),
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
-      });
-      onCreated(invoice);
+      };
+      const saved = isEditing
+        // Editing sends email/phone even when blank — that's how you clear
+        // one (e.g. to switch an invoice from WhatsApp back to email).
+        ? await updateInvoice(invoice!.invoice_id, { ...shared, email: email.trim(), phone: phone.trim() })
+        : await createInvoice({
+            ...shared,
+            ...(email.trim() ? { email: email.trim() } : {}),
+            ...(phone.trim() ? { phone: phone.trim() } : {}),
+          });
+      onCreated(saved);
     } catch (err: any) {
       setFormError(err?.details || err?.error || 'Could not save that. Check the server is running.');
     } finally {
@@ -56,10 +69,10 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
   };
 
   return (
-    <div className="overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label="Add an invoice">
+    <div className="overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label={isEditing ? 'Edit invoice' : 'Add an invoice'}>
       <form className="overlay-card" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 26 }}>
-          <h3 className="title">Add an invoice</h3>
+          <h3 className="title">{isEditing ? `Edit ${invoice!.invoice_id}` : 'Add an invoice'}</h3>
           <button type="button" className="pill pill--icon" onClick={onClose} aria-label="Close">
             <X size={16} />
           </button>
@@ -138,7 +151,7 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
           )}
 
           <button type="submit" className="pill pill--lg pill--solid" disabled={submitting} style={{ marginTop: 4 }}>
-            {submitting ? <><span className="spin" /> Saving…</> : 'Add it to the ledger'}
+            {submitting ? <><span className="spin" /> Saving…</> : isEditing ? 'Save changes' : 'Add it to the ledger'}
           </button>
         </div>
       </form>

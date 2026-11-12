@@ -24,6 +24,7 @@ behind them.
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -49,11 +50,21 @@ if FIRESTORE_ENABLED:
         from google.cloud import firestore as _firestore  # noqa: N812
 
         _firestore_client = _firestore.Client()
-        print("[MEMORY] FIRESTORE_ENABLED=true — using Firestore for client memory and message history.", flush=True)
+        # This import happens at module load time — before agent_bridge.py's
+        # main() has a chance to redirect stdout to stderr — so it's the one
+        # print in this file that MUST name stderr explicitly. Anything
+        # printed to stdout here lands ahead of the bridge's JSON response
+        # and breaks Node's JSON.parse() of it.
+        print(
+            "[MEMORY] FIRESTORE_ENABLED=true — using Firestore for client memory and message history.",
+            file=sys.stderr,
+            flush=True,
+        )
     except Exception as e:  # noqa: BLE001 - any init failure should degrade, not crash the bridge
         print(
             f"[MEMORY] FIRESTORE_ENABLED=true but Firestore client init failed ({e}). "
             "Falling back to local JSON file — this will NOT survive a Cloud Run cold start.",
+            file=sys.stderr,
             flush=True,
         )
         _firestore = None

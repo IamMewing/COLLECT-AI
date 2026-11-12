@@ -35,6 +35,7 @@ changes needed on the Node side.
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +57,15 @@ if FIRESTORE_ENABLED:
 
         _firestore_client = _firestore.Client()
     except Exception as e:  # noqa: BLE001 - degrade to local JSON, same as every other module here
-        print(f"[PAYPAL_TOOLS] FIRESTORE_ENABLED=true but Firestore client init failed ({e}). Using local JSON file.", flush=True)
+        # Same reasoning as agent/memory.py's module-level print: this runs
+        # at import time, before agent_bridge.py's main() redirects stdout
+        # to stderr, so it has to name stderr explicitly or it corrupts the
+        # bridge's JSON response on stdout.
+        print(
+            f"[PAYPAL_TOOLS] FIRESTORE_ENABLED=true but Firestore client init failed ({e}). Using local JSON file.",
+            file=sys.stderr,
+            flush=True,
+        )
         _firestore_client = None
 
 

@@ -11,14 +11,25 @@ WhatsApp isn't subject to India's SMS-specific DLT rules.
 
 Verified against Meta's own documented request/response shape for
 POST https://graph.facebook.com/<version>/<PHONE_NUMBER_ID>/messages
-(see https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages)
-— this project has no Meta app of its own yet to test a live call against
-from this environment (outbound network here is restricted to package
-registries), so unlike sms_tools.py/paypal_tools.py this hasn't been
-exercised against a real response, only built to the documented contract.
-Treat the exact error-handling branches below as unverified until a real
-send has actually been tried from a deployed environment with network
-access to graph.facebook.com — see README for that verification step.
+(see https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages),
+and since confirmed against a real deployed call: a genuine send returns
+real_send=True with a wamid, a test-mode recipient not yet added to the
+app's allowed-tester list comes back as error 131030, and an expired
+temporary access token comes back as error 190 — all three have actually
+been seen and handled, not just anticipated from the docs.
+
+What hadn't been verified — because nothing was listening for it — is
+what happens to a message AFTER Meta accepts it. The send's HTTP response
+only ever means "queued for delivery," never "arrived": Meta reports what
+actually happened (sent -> delivered -> read, or failed, with a real
+reason) through a SEPARATE, asynchronous webhook callback (`statuses` on
+POST /api/whatsapp/webhook in server.js), not through this function's
+return value. A message that Meta accepted and then genuinely failed to
+deliver looked, from here, identical to one that was read — same
+real_send=True, same wamid, same "SENT (REAL WHATSAPP)" — because nothing
+captured the later event that would have said otherwise. See
+agent/memory.py's update_message_delivery_status and server.js's webhook
+handler for where that signal is actually picked up now.
 
 There is no SMS fallback here (unlike the old Twilio path) — WhatsApp is now
 the only phone channel, via this module. send_message() in execute.py simply
@@ -27,12 +38,23 @@ guessing whether the 24h "customer service window" is open the way the old
 Twilio code did with its SMS-vs-WhatsApp branch: Meta's API is the source of
 truth on whether a given send is actually allowed right now, so a rejected
 send is reported honestly (status='failed', with Meta's own error message)
-rather than silently assumed to need different handling in advance. In
-practice that means: the agent's first, business-initiated outreach on a
-phone-only invoice will fail here unless an approved message template is
-configured (this project doesn't have one set up — see README), while any
-reply to a message the client sent first will succeed, since that's what
-opens the 24h window.
+rather than silently assumed to need different handling in advance.
+
+In practice that means the agent's first, business-initiated outreach on a
+phone-only invoice needs an approved message template (send_whatsapp_template_message
+below) once the WhatsApp app is out of test mode — a verified business
+account's recipients don't get the test app's "ask Meta to relax the 24h
+rule for my own registered testers" exception, so free text to someone who
+has never messaged first gets rejected there, typically with error 131047.
+Test mode is more forgiving specifically for numbers you've added as
+testers (the 131030 error IS that allowlist, not the 24h rule — a number
+can fail 131030 while the window question never even comes up), which is
+why this has been possible to demo at all without a template configured.
+send_message() in execute.py uses the template path automatically, for the
+very first message on an invoice only, when META_WHATSAPP_TEMPLATE_NAME is
+set — seeREADME for the exact template body to submit for approval; with
+it unset, behavior is exactly what it's always been (free text, reported
+honestly either way).
 """
 
 import os
@@ -44,6 +66,45 @@ except ImportError:  # pragma: no cover - requests is a required dependency once
     requests = None  # type: ignore[assignment]
 
 GRAPH_API_VERSION = "v21.0"
+
+# Meta's own error text is accurate but assumes you already know the Cloud
+# API's test-mode rules — "recipient phone number not in allowed list" reads
+# like a permissions bug, not "add this exact number in a specific screen
+# and verify it by OTP before retrying." These four are the ones actually
+# seen from this app (131030, 190 in whatsapp_tools' own history; 131047 and
+# 131026 are the other two a hackathon demo account is likely to hit — the
+# first time it tries to message someone outside the 24h window without a
+# template, or a number that isn't itself on WhatsApp). Appending a concrete
+# next step turns a one-off diagnosis into something the UI explains on its
+# own the next time, instead of needing this looked up again.
+_ERROR_HINTS: dict[str, str] = {
+    "131030": (
+        "this number isn't on the test app's allowed recipient list yet — "
+        "add it in Meta Business Suite under WhatsApp Manager -> API Setup "
+        "(\"To\" field / manage phone number list), then verify it with the "
+        "OTP sent to that phone before retrying."
+    ),
+    "190": (
+        "the access token has expired or is invalid — temporary tokens last "
+        "~24h. Regenerate one in Meta's API Setup page, or switch to a "
+        "System User permanent token (Business Settings -> System Users -> "
+        "generate token with whatsapp_business_messaging scope) so this "
+        "stops happening."
+    ),
+    "131047": (
+        "this is a business-initiated message outside the 24h customer "
+        "service window with no approved template — either have the "
+        "recipient message you first (which opens a 24h free-text window), "
+        "or get a message template approved and set "
+        "META_WHATSAPP_TEMPLATE_NAME."
+    ),
+    "131026": (
+        "Meta couldn't deliver this to the device — the number usually "
+        "isn't reachable on WhatsApp at all (not registered, or WhatsApp "
+        "uninstalled there). Confirm the number has an active WhatsApp "
+        "account before retrying."
+    ),
+}
 
 
 def _normalize_recipient(raw: str) -> str:
@@ -112,6 +173,9 @@ def send_whatsapp_message(to_phone: str, body: str, opens_session: bool = False)
                 code_part += f"/{err['error_subcode']}"
             detail = err.get("error_user_msg") or err.get("message") or resp.text[:200]
             error_msg = f"{code_part}: {detail}"
+            hint = _ERROR_HINTS.get(str(err.get("code", "")))
+            if hint:
+                error_msg += f" — {hint}"
             print(f"[SEND via whatsapp] Real send FAILED ({error_msg}).", flush=True)
             return {
                 "status": "failed", "channel_used": "whatsapp", "real_send": False,

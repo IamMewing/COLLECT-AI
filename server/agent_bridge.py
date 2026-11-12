@@ -454,6 +454,40 @@ def handle_assistant(payload: dict) -> dict:
     return {"answer": str(result).strip(), "mock": False}
 
 
+def handle_whatsapp_status(payload: dict) -> dict:
+    """Triggered by server.js's POST /api/whatsapp/webhook for every status
+    object Meta sends in the `statuses` array of a WhatsApp webhook event —
+    'sent' (Meta's edge accepted it), 'delivered' (reached the device),
+    'read', or 'failed' (with a real error in `errors[0]`). These arrive on
+    their own, asynchronously, after the original send's HTTP response —
+    which only ever meant "the Graph API validated and queued this," not
+    "it arrived." Before this exchange existed, that initial response was
+    the only thing the UI ever learned, so a message Meta accepted and then
+    actually failed to deliver looked identical, forever, to one that
+    reached the person: 'SENT (REAL WHATSAPP)' with a real message id,
+    nothing to contradict it. This closes that gap — it updates the stored
+    history entry (joined on the wamid) and tells server.js whether this
+    is worth surfacing as a notification."""
+    message_sid = payload.get("message_sid")
+    status = payload.get("status")
+    error = payload.get("error")
+    if not message_sid or not status:
+        raise ValueError("Missing 'message_sid' or 'status' in whatsapp_status payload")
+
+    from agent.memory import update_message_delivery_status
+
+    updated = update_message_delivery_status(message_sid, status, error)
+    return {
+        "found": updated is not None,
+        "invoice_id": (updated or {}).get("invoice_id"),
+        "client_name": (updated or {}).get("client_name"),
+        "channel": (updated or {}).get("channel"),
+        "recipient": (updated or {}).get("recipient"),
+        "status": status,
+        "error": error,
+    }
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -486,11 +520,14 @@ def main():
                 res = handle_negotiation_state(payload)
             elif action == "assistant":
                 res = handle_assistant(payload)
+            elif action == "whatsapp_status":
+                res = handle_whatsapp_status(payload)
             else:
                 raise ValueError(
                     f"Unknown action '{action}'. Valid actions are 'sweep', 'approve', "
                     "'payment_confirmed', 'check_replies', 'installment_paid', "
-                    "'incoming_text', 'voice_turn', 'negotiation_state', and 'assistant'."
+                    "'incoming_text', 'voice_turn', 'negotiation_state', 'assistant', "
+                    "and 'whatsapp_status'."
                 )
 
         json.dump(res, sys.stdout)

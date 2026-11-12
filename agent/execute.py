@@ -11,6 +11,7 @@ import os
 import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
+from email.utils import formataddr, formatdate, make_msgid
 
 from .agents import build_reflect_agent, build_negotiate_agent
 from .models import DraftedMessage, Reflection, NegotiationTurn
@@ -84,6 +85,19 @@ def send_message(
         SMTP_PASS      (an App Password — NOT your regular account password)
         DEMO_RECIPIENT_EMAIL  (fallback recipient when an invoice has no
                                email of its own — use your own inbox)
+        SMTP_FROM_NAME (optional, default "CollectAI" — the display name on
+                        the From header, e.g. "CollectAI <you@gmail.com>")
+
+    "sent"/real_send=True here means exactly one thing: Gmail's SMTP server
+    accepted and queued the message. That's the full extent of what this
+    can verify — unlike the WhatsApp path (see whatsapp_tools.py), personal
+    Gmail SMTP has no delivery webhook to report what happened after. In
+    practice, a brand-new sending identity's first messages to someone —
+    especially ones about an overdue payment, under any time pressure, with
+    a link — are exactly what spam filters are tuned to catch, and often
+    land in Spam/Promotions rather than failing outright. If a client says
+    they "never got it," that's the first place to check, not a sign the
+    send silently failed.
     `invoice_id`, when given, gets woven into the subject as an "[INV-XXXX]"
     tag (see _tag_subject) — this is what lets agent/inbox.py's reply poller
     match an incoming reply back to this invoice's conversation thread.
@@ -124,8 +138,20 @@ def send_message(
 
                 mime_msg = MIMEText(message.body)
                 mime_msg["Subject"] = _tag_subject(message.subject, invoice_id)
-                mime_msg["From"] = smtp_user
+                # A display name on From ("CollectAI <you@gmail.com>" rather
+                # than the bare address) is one of the cheap, well-documented
+                # legitimacy signals spam filters weigh — real senders almost
+                # always have one, bare-address mail disproportionately
+                # doesn't. formataddr handles the quoting/escaping correctly
+                # rather than hand-building the header.
+                mime_msg["From"] = formataddr((os.environ.get("SMTP_FROM_NAME", "CollectAI"), smtp_user))
                 mime_msg["To"] = recipient
+                # Date/Message-ID aren't added automatically by MIMEText +
+                # smtplib the way a real MUA would set them — their absence
+                # is itself a signal some filters read as "auto-generated,"
+                # so they're set explicitly rather than left to chance.
+                mime_msg["Date"] = formatdate(localtime=True)
+                mime_msg["Message-ID"] = make_msgid(domain=smtp_user.split("@")[-1])
 
                 with smtplib.SMTP(host, port, timeout=15) as server:
                     server.starttls()
@@ -228,10 +254,11 @@ def approve_and_execute(
 
     # First-ever outreach on an invoice is always business-initiated, never a
     # reply to something the client just sent — so opens_session is always
-    # False here. For channel='whatsapp' that means send_message/sms_tools
-    # will actually send it as SMS instead (see sms_tools.send_text_message's
-    # docstring): a free-form WhatsApp message here would need a pre-approved
-    # template, which isn't something this demo has set up.
+    # False here. For channel='whatsapp' that means Meta requires an
+    # approved message template for this exact send (free-form text is only
+    # allowed once the client has messaged first) — see whatsapp_tools.py's
+    # docstring and send_message()'s template branch below for how that's
+    # actually handled now.
     send_result = send_message(
         message, recipient_email=recipient_email, recipient_phone=recipient_phone,
         invoice_id=invoice_id, opens_session=False,
@@ -278,6 +305,12 @@ def approve_and_execute(
         "recipient": send_result.get("recipient"),
         "status": send_result.get("status"),
         "real_send": send_result.get("real_send", False),
+        # The wamid. Meta's delivery/read/failed status callbacks (handled
+        # in server.js's WhatsApp webhook) arrive later and only carry this
+        # id — without it stored here, a later "failed" status has nothing
+        # to join back to, which is exactly how a real send that Meta
+        # accepted and then silently dropped went unnoticed before.
+        "message_sid": send_result.get("message_sid"),
     })
 
     # IMPORTANT: this must reflect what send_message() actually reported, not
@@ -471,6 +504,7 @@ def handle_incoming_reply(reply: dict) -> dict:
             "recipient": send_result.get("recipient"),
             "status": send_result.get("status"),
             "real_send": send_result.get("real_send", False),
+            "message_sid": send_result.get("message_sid"),
             "autonomous_reply": True,
         })
     else:

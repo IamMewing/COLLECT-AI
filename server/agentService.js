@@ -243,6 +243,24 @@ async function askAssistant(question, invoices) {
   return callAgentBridge('assistant', { question, invoices });
 }
 
+/**
+ * Called by server.js's WhatsApp webhook handler for every status object
+ * ('sent' | 'delivered' | 'read' | 'failed') in a `statuses` callback from
+ * Meta — see agent_bridge.py's handle_whatsapp_status for why this exists:
+ * the original send's HTTP response only ever meant "Meta queued this,"
+ * never "it arrived," and this is the only later signal that says what
+ * actually happened. Returns whether a stored history entry was found for
+ * this message_sid (wamid) and, if so, enough of it (invoice_id,
+ * client_name, channel) for the webhook handler to raise a notification.
+ *
+ * @param {string} messageSid - the wamid from the original send.
+ * @param {string} status - 'sent' | 'delivered' | 'read' | 'failed'.
+ * @param {string|null} error - Meta's error text, only present on 'failed'.
+ */
+async function reportWhatsappStatus(messageSid, status, error = null) {
+  return callAgentBridge('whatsapp_status', { message_sid: messageSid, status, error });
+}
+
 module.exports = {
   runSweep,
   approveAndExecute,
@@ -253,4 +271,5 @@ module.exports = {
   handleIncomingText,
   handleVoiceTurn,
   askAssistant,
+  reportWhatsappStatus,
 };

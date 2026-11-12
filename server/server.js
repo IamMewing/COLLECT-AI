@@ -7,7 +7,7 @@ const rateLimit = require('express-rate-limit');
 const twilio = require('twilio');
 require('dotenv').config();
 
-const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText, handleVoiceTurn, askAssistant } = require('./agentService');
+const { runSweep, approveAndExecute, confirmPayment, checkReplies, confirmInstallmentPaid, getNegotiationState, handleIncomingText, handleVoiceTurn, askAssistant, reportWhatsappStatus } = require('./agentService');
 const paypalService = require('./paypalService');
 const store = require('./store');
 const notifications = require('./notifications');
@@ -999,10 +999,52 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const change = entry?.changes?.[0];
     const message = change?.value?.messages?.[0];
 
+    // Status callbacks — Meta reports what actually happened to a message it
+    // already accepted ('sent' -> 'delivered' -> 'read', or 'failed' with a
+    // real reason) through this SAME webhook, as `value.statuses`, in a
+    // separate call from the one that carries `value.messages`. This used
+    // to be acknowledged and thrown away — which is exactly how a message
+    // Meta accepted (a real wamid, "SENT (REAL WHATSAPP)" in the UI) and
+    // then failed to actually deliver went unnoticed: the send's own HTTP
+    // response never meant "arrived," only "queued," and nothing was
+    // listening for the event that says what happened next. Now it's
+    // joined back onto the stored history entry and, on a real failure,
+    // raised as a notification — so "it says sent but they never got it"
+    // shows up here instead of staying a live mystery.
+    const statuses = change?.value?.statuses;
+    if (Array.isArray(statuses) && statuses.length) {
+      for (const s of statuses) {
+        const errorDetail = Array.isArray(s.errors) && s.errors[0]
+          ? `${s.errors[0].code}: ${s.errors[0].title || s.errors[0].message || ''}`.trim()
+          : null;
+        try {
+          const outcome = await reportWhatsappStatus(s.id, s.status, errorDetail);
+          console.log(`📬 [WhatsApp webhook] Status ${s.status} for ${s.id}${errorDetail ? ` (${errorDetail})` : ''} — ${outcome.found ? 'matched to stored send' : 'no stored send found for this id'}.`);
+          if (outcome.found && s.status === 'failed') {
+            await notifications.record({
+              kind: 'failed',
+              title: `WhatsApp to ${outcome.client_name || 'client'} didn’t arrive`,
+              body: errorDetail
+                ? `Meta accepted this send and then rejected it: ${errorDetail}`
+                : 'Meta accepted this send and then reported it as failed, with no reason given.',
+              invoice_id: outcome.invoice_id,
+              client_name: outcome.client_name,
+            });
+          }
+        } catch (err) {
+          // A status we can't process is a logging gap, not a reason to
+          // fail the webhook — Meta retries on non-2xx, and retrying a
+          // status callback (as opposed to an inbound message) gains us
+          // nothing since it's always the same fixed fact either way.
+          console.error('⚠️  [WhatsApp webhook] Failed to process a status callback:', err);
+        }
+      }
+    }
+
     if (!message || message.type !== 'text') {
-      // Status callbacks (delivered/read receipts) and non-text message
-      // types land here too — nothing for the negotiation loop to do with
-      // those, so just acknowledge and move on.
+      // Non-text message types (images, reactions, etc.) land here too —
+      // nothing for the negotiation loop to do with those, so just
+      // acknowledge and move on.
       return res.sendStatus(200);
     }
 

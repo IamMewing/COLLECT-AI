@@ -194,6 +194,64 @@ def list_message_history(limit: int = 100) -> list[dict[str, Any]]:
         return []
 
 
+def update_message_delivery_status(
+    message_sid: str, status: str, error: str | None = None
+) -> dict[str, Any] | None:
+    """Joins a later WhatsApp delivery/read/failed status callback (Meta's
+    `statuses` webhook field — see server.js's POST /api/whatsapp/webhook)
+    back onto the history entry `record_message_history` wrote at send time,
+    keyed on `message_sid` (the wamid). This is the piece that was missing
+    entirely before: the API's initial response only ever meant "Meta
+    accepted this for delivery," never "it arrived" — and with nothing
+    listening for the webhook that reports what actually happened next, a
+    message that failed after being accepted looked identical, forever, to
+    one that was genuinely read. See whatsapp_tools.py's module docstring.
+
+    Returns the updated record (so the caller can decide whether to raise a
+    user-facing notification — e.g. only on `status == "failed"`) or None if
+    no stored entry has this message_sid (nothing to update, not an error:
+    a status callback can arrive for a send this process never logged, e.g.
+    after a restart with local-JSON storage).
+    """
+    if not message_sid:
+        return None
+    updates = {
+        "delivery_status": status,
+        "delivery_error": error,
+        "delivery_updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        if _firestore_client is not None:
+            try:
+                docs = list(
+                    _firestore_client.collection("message_history")
+                    .where("message_sid", "==", message_sid)
+                    .limit(5)
+                    .stream()
+                )
+                updated = None
+                for d in docs:
+                    d.reference.update(updates)
+                    updated = {**d.to_dict(), **updates}
+                return updated
+            except Exception as e:  # noqa: BLE001 - degrade to local JSON, don't crash the webhook handler
+                _disable_firestore(e)
+        if not HISTORY_FILE.exists():
+            return None
+        history = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        updated = None
+        for entry in history:
+            if entry.get("message_sid") == message_sid:
+                entry.update(updates)
+                updated = entry
+        if updated is not None:
+            HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
+        return updated
+    except Exception as e:  # noqa: BLE001 - a webhook handler must never 500 on a logging failure
+        print(f"[MEMORY] Warning: failed to update delivery status for {message_sid} ({e}).", flush=True)
+        return None
+
+
 def has_client_memory(client_name: str) -> bool:
     """Return True if a memory record already exists for this client."""
     if not client_name:

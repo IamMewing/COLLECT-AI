@@ -15,7 +15,6 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
   const isEditing = !!invoice;
   const [clientName, setClientName] = useState(invoice?.client_name ?? '');
   const [email, setEmail] = useState(invoice?.email ?? '');
-  const [phone, setPhone] = useState(invoice?.phone ?? '');
   const [amount, setAmount] = useState(invoice ? String(invoice.amount) : '');
   const [daysOverdue, setDaysOverdue] = useState(invoice ? String(invoice.days_overdue) : '0');
   const [ignoredReminders, setIgnoredReminders] = useState(invoice ? String(invoice.ignored_reminders) : '0');
@@ -36,10 +35,6 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
       setFormError("That email doesn't look right — double-check it or leave it blank.");
       return;
     }
-    if (phone.trim() && !/^\+?[0-9\s().-]{7,20}$/.test(phone.trim())) {
-      setFormError("That phone number doesn't look right — use E.164 (e.g. +14155550100) or leave it blank.");
-      return;
-    }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -52,13 +47,11 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
         historical_on_time_rate: Math.min(100, Math.max(0, Number(onTimeRate) || 80)) / 100,
       };
       const saved = isEditing
-        // Editing sends email/phone even when blank — that's how you clear
-        // one (e.g. to switch an invoice from WhatsApp back to email).
-        ? await updateInvoice(invoice!.invoice_id, { ...shared, email: email.trim(), phone: phone.trim() })
+        // Editing sends email even when blank — that's how you clear it.
+        ? await updateInvoice(invoice!.invoice_id, { ...shared, email: email.trim() })
         : await createInvoice({
             ...shared,
             ...(email.trim() ? { email: email.trim() } : {}),
-            ...(phone.trim() ? { phone: phone.trim() } : {}),
           });
       onCreated(saved);
     } catch (err: any) {
@@ -97,18 +90,6 @@ export const AddInvoiceForm: React.FC<AddInvoiceFormProps> = ({ onClose, onCreat
             />
             <p className="mono" style={{ color: 'var(--muted)', fontSize: '0.72rem', marginTop: 4 }}>
               If you leave this blank, outreach for this invoice goes to the demo inbox instead of the real client.
-            </p>
-          </div>
-
-          <div>
-            <label className="lbl" htmlFor="af-phone">Their phone (optional)</label>
-            <input
-              id="af-phone" className="inp" type="tel" value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+14155550100"
-            />
-            <p className="mono" style={{ color: 'var(--muted)', fontSize: '0.72rem', marginTop: 4 }}>
-              Add this to let the agent reach them by WhatsApp or SMS, not just email — use the full international format (e.g. +1…).
             </p>
           </div>
 

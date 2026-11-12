@@ -37,8 +37,8 @@ export const LedgerPage: React.FC = () => {
           <h3 className="title">Add the first account you’re chasing</h3>
           <p className="body" style={{ marginTop: 12, opacity: 0.8 }}>
             This ledger holds real accounts only — no sample data. Give an invoice a
-            client, an amount, how late it is, and at least one way to reach them
-            (email or a phone number with country code). The agent takes it from there.
+            client, an amount, how late it is, and their email. The agent takes it
+            from there.
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 26 }}>
             <button className="pill pill--lg pill--solid" onClick={() => setShowAddInvoice(true)}>
